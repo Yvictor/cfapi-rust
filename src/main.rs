@@ -12,59 +12,79 @@ use cxx::let_cxx_string;
 //     generate!("DoMath")
 //     generate!("Goat")
 // }
-pub mod session {
-    autocxx::include_cpp! {
-        #include "cfapi.h"
-        name!(ffisession)
-        safety!(unsafe_ffi)
-        generate!("cfapi::Session")
-    }
-    pub use ffisession::*;
-}
+// pub mod session {
+//     autocxx::include_cpp! {
+//         #include "cfapi.h"
+//         name!(ffi_session)
+//         safety!(unsafe_ffi)
+//         generate!("cfapi::Session")
+//     }
+//     pub use ffi_session::*;
+// }
 
-pub mod user {
-    autocxx::include_cpp! {
-        #include "cfapi.h"
-        name!(ffiuser)
-        safety!(unsafe_ffi)
-        generate!("cfapi::UserInfo")
-    }
-    pub use ffiuser::*;
-}
+// pub mod user {
+//     autocxx::include_cpp! {
+//         #include "cfapi.h"
+//         name!(ffi_user)
+//         safety!(unsafe_ffi)
+//         generate!("cfapi::UserInfo")
+//     }
+//     pub use ffi_user::*;
+// }
 
 include_cpp! {
     #include "cfapi.h"
     #include "api.h"
     // #include "APIFactory.h"
     safety!(unsafe_ffi)
-    // generate!("cfapi::Session")
+    generate!("cfapi::Session")
     // generate!("cfapi::APIFactory")
     generate!("APIFactoryWrap")
-    extern_cpp_type!("cfapi::Session", crate::session::cfapi::Session)
+    generate!("GetEventReader")
+    // generate!("GetDatetime")
+    generate!("GetDate")
+    generate!("GetTime")
+    // extern_cpp_type!("cfapi::Session", crate::session::cfapi::Session)
     // generate!("cfapi::UserEventHandler")
-    // generate!("cfapi::UserInfo")
-    extern_cpp_type!("cfapi::UserInfo", crate::user::cfapi::UserInfo)
+    generate!("cfapi::SessionConfig")
+    generate!("cfapi::HostConfig")
+    generate!("cfapi::UserInfo")
+    // extern_cpp_type!("cfapi::UserInfo", crate::user::cfapi::UserInfo)
     subclass!("cfapi::UserEventHandler", MyUserEventHandler)
     generate!("cfapi::UserEvent")
     subclass!("cfapi::SessionEventHandler", MySessionEventHandler)
     generate!("cfapi::SessionEvent")
     subclass!("cfapi::MessageEventHandler", MyMessageEventHandler)
     generate!("cfapi::MessageEvent")
+    generate!("cfapi::MessageReader")
+    generate!("cfapi::ValueTypes")
+    generate!("cfapi::Commands")
+    generate!("cfapi::DateTime")
+    generate!("cfapi::Date")
+    generate!("cfapi::Time")
 }
 use ffi::*;
 
-#[subclass]//(superclass("cfapi::UserEventHandler"))
+#[subclass] //(superclass("cfapi::UserEventHandler"))
 #[derive(Default)]
 pub struct MyUserEventHandler;
 
 impl cfapi::UserEventHandler_methods for MyUserEventHandler {
     fn onUserEvent(&mut self, event: &cfapi::UserEvent) {
-        let _event_type = event.getType();
+        let event_type = event.getType();
         println!("on event: {:?}", event.getRetCode());
+        match event_type {
+            cfapi::UserEvent_Types::AUTHORIZATION_FAILURE => {
+                println!("AUTHORIZATION_FAILURE");
+            }
+            cfapi::UserEvent_Types::AUTHORIZATION_SUCCESS => {
+                println!("AUTHORIZATION_SUCCESS");
+            }
+        }
     }
 }
 
-#[subclass]//(superclass("cfapi::SessionEventHandler"))
+#[subclass] //(superclass("cfapi::SessionEventHandler"))
 #[derive(Default)]
 pub struct MySessionEventHandler;
 
@@ -132,10 +152,100 @@ impl cfapi::SessionEventHandler_methods for MySessionEventHandler {
 #[derive(Default)]
 pub struct MyMessageEventHandler;
 
+
 impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
     fn onMessageEvent(&mut self, event: &cfapi::MessageEvent) {
         println!("onMessageEvent");
-        let _event_type = event.getType() as cfapi::MessageEvent_Types;
+        let event_type = event.getType() as cfapi::MessageEvent_Types;
+        match event_type {
+            cfapi::MessageEvent_Types::STATUS | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
+                println!("get respones tag: {:?}", event.getTag());
+                println!(
+                    "Status code={:?} ({}) for tag {}",
+                    event.getStatusCode(),
+                    event.getStatusString(),
+                    event.getTag()
+                );
+            }
+            cfapi::MessageEvent_Types::UPDATE => {
+                println!("Update Event");
+            }
+            _ => {
+                println!("event_type: {}", event_type as i32);
+            }
+        }
+        let perm = event.getPermission();
+        println!("permission: {:?}", perm);
+        let src = event.getSource();
+        println!("source: {:?}", src);
+        let symbol = event.getSymbol();
+        println!("symbol: {:?}", symbol);
+        let reader = GetEventReader(event) as *mut cfapi::MessageReader;
+        let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+        //cfapi::MessageReader::END_OF_MESSAGE
+        while reader.as_mut().next() != autocxx::c_int(-1) {
+            match reader.as_mut().getValueType() {
+                cfapi::ValueTypes::INT64 => {
+                    println!(
+                        "{}({})={}",
+                        reader.as_mut().getTokenName(),
+                        i32::from(reader.as_mut().getTokenNumber()),
+                        reader.as_mut().getValueAsInteger()
+                    );
+                }
+                cfapi::ValueTypes::DOUBLE => {
+                    println!(
+                        "{}({})={}",
+                        reader.as_mut().getTokenName(),
+                        i32::from(reader.as_mut().getTokenNumber()),
+                        reader.as_mut().getValueAsDouble()
+                    );
+                }
+                cfapi::ValueTypes::STRING => {
+                    println!(
+                        "{}({})={}",
+                        reader.as_mut().getTokenName(),
+                        i32::from(reader.as_mut().getTokenNumber()),
+                        reader.as_mut().getValueAsString()
+                    );
+                }
+                cfapi::ValueTypes::DATETIME => {
+                    let d = GetDate(&reader.as_ref()) as *mut cfapi::Date;
+                    let t = GetTime(&reader.as_ref()) as *mut cfapi::Time;
+                    let mut d = unsafe { std::pin::Pin::new_unchecked(&mut *d) };
+                    let mut t = unsafe { std::pin::Pin::new_unchecked(&mut *t) };
+                    let y = d.as_mut().year();
+                    let m = d.as_mut().month();
+                    let d = d.as_mut().day();
+                    let h = t.as_mut().hour();
+                    let min = t.as_mut().minute();
+                    let s = t.as_mut().second();
+                    let ms =
+                        (t.as_mut().millisecond() as i32 * 1000) + t.as_mut().microsecond() as i32;
+                    println!(
+                        "{}({})=datetime {}-{:02}-{:02} {:02}:{:02}:{:02}.{:06} UTC({})",
+                        reader.as_mut().getTokenName(),
+                        i32::from(reader.as_mut().getTokenNumber()),
+                        y,
+                        m,
+                        d,
+                        h,
+                        min,
+                        s,
+                        ms,
+                        reader.as_mut().getValueAsDouble(),
+                    );
+                }
+                _ => {
+                    println!(
+                        "{}({})=unknown type",
+                        reader.as_mut().getTokenName(),
+                        i32::from(reader.as_mut().getTokenNumber()),
+                    );
+                }
+            }
+        }
+        println!("<EXT>");
     }
 }
 
@@ -157,6 +267,7 @@ fn main() {
     // obj.as_mut().initialize(&app_name, &app_version, true, &log_filename, "External");
     let user_event_handler = MyUserEventHandler::default_rust_owned();
     let session_event_handler = MySessionEventHandler::default_rust_owned();
+    let message_event_handler = MyMessageEventHandler::default_rust_owned();
     // let pin_user_event_handler: Pin<&mut cfapi::UserEventHandler> =
     //     unsafe { std::pin::Pin::new_unchecked(user_event_handler as &mut cfapi::UserEventHandler) };
     // let pin_session_event_handler: Pin<&mut cfapi::SessionEventHandler> =
@@ -166,7 +277,7 @@ fn main() {
     let_cxx_string!(user_name = "SINOPACNB");
     let_cxx_string!(password = "s1nopac");
 
-    let _api = ffi::APIFactoryWrap::new(
+    let mut api = ffi::APIFactoryWrap::new(
         &app_name,
         &app_version,
         true,
@@ -182,6 +293,37 @@ fn main() {
         // &session_event_handler,
     )
     .within_unique_ptr();
+    // let api = CppUniquePtrPin::new(api);
+    api.pin_mut().setSessionConfig(
+        cfapi::SessionConfig_Parameters::MAX_USER_THREADS_LONG,
+        autocxx::c_long(10),
+    );
+    let_cxx_string!(host_info = "216.221.213.14:7022");
+    api.pin_mut().setHostConfig(host_info, false, true);
+    api.pin_mut()
+        .registerMessageEventHandler(message_event_handler.as_ref().borrow().as_ref());
+    // api.pin_mut().setConnectionConfig(
+    //     cfapi::HostConfig_Parameters::CONFLATION_INTERVAL_LONG,
+    //     false,
+    // );
+    // api.pin_mut().setConnectionConfig(
+    //     cfapi::HostConfig_Parameters::CONFLATION_INTERVAL_LONG,
+    //     autocxx::c_long(10),
+    // );
+
+    api.pin_mut().startSession();
+    let_cxx_string!(src_id = "533");
+    let_cxx_string!(symbol = "AAPL");
+    let req = api.pin_mut()
+        .sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBE );
+    println!("req: {}", req);
+    // let_cxx_string!(src_id = "533");
+    // let_cxx_string!(symbol = "{^A}");
+    // api.pin_mut().sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    std::thread::sleep(std::time::Duration::from_secs(30*60));
+    // let mut session = api.pin_mut().getSession();
+    // let mut session_config = session.getSessionConfig();//.pin_mut().getSessionConfig();
+
     // api
     // ffi::cfapi::APIFactory::createSession(obj.as_mut(), &user_name, &password, &user_event_handler);
     // obj.as_mut().createSession(&user_name, &password, &user_event_handler);
