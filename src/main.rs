@@ -3,6 +3,8 @@ use autocxx::prelude::*;
 // use autocxx::subclass::prelude::*;
 use autocxx::subclass::*;
 use cxx::let_cxx_string;
+use dashmap::DashMap;
+use serde::{Deserialize, Serialize};
 // use cxx::{}
 
 // include_cpp! {
@@ -64,6 +66,18 @@ include_cpp! {
     generate!("cfapi::Time")
 }
 use ffi::*;
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct DataSrc533 {
+    symbol: String,
+    ts: f64,
+    ask_price: f64,
+    ask_size: i64,
+    bid_price: f64,
+    bid_size: i64,
+    price: f64,
+    volume: i64,
+}
 
 #[subclass] //(superclass("cfapi::UserEventHandler"))
 #[derive(Default)]
@@ -150,101 +164,309 @@ impl cfapi::SessionEventHandler_methods for MySessionEventHandler {
 
 #[subclass]
 #[derive(Default)]
-pub struct MyMessageEventHandler;
-
+pub struct MyMessageEventHandler {
+    pub maps: DashMap<String, DataSrc533>,
+    pub debug: bool,
+}
 
 impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
     fn onMessageEvent(&mut self, event: &cfapi::MessageEvent) {
         println!("onMessageEvent");
         let event_type = event.getType() as cfapi::MessageEvent_Types;
         match event_type {
-            cfapi::MessageEvent_Types::STATUS | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
-                println!("get respones tag: {:?}", event.getTag());
+            // cfapi::MessageEvent_Types::STATUS | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
+            cfapi::MessageEvent_Types::IMAGE_PART | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
                 println!(
-                    "Status code={:?} ({}) for tag {}",
-                    event.getStatusCode(),
-                    event.getStatusString(),
-                    event.getTag()
+                    "event type: {}",
+                    match event_type {
+                        cfapi::MessageEvent_Types::IMAGE_PART => "IMAGE_PART",
+                        cfapi::MessageEvent_Types::IMAGE_COMPLETE => "IMAGE_COMPLETE",
+                        cfapi::MessageEvent_Types::STATUS => "STATUS",
+                        _ => "UNKNOWN",
+                    }
                 );
+                if self.debug {
+                    println!("get respones tag: {:?}", event.getTag());
+                    println!(
+                        "Status code={:?} ({}) for tag {}",
+                        event.getStatusCode(),
+                        event.getStatusString(),
+                        event.getTag()
+                    );
+                }
+                let src = event.getSource();
+                if src == autocxx::c_int(533) {
+                    println!("source: {:?}", src);
+                    let reader = GetEventReader(event) as *mut cfapi::MessageReader;
+                    let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+
+                    let price = if reader.as_mut().find(autocxx::c_int(8)) {
+                        reader.as_mut().getValueAsDouble()
+                    } else {
+                        0.0
+                    };
+                    let volume = if reader.as_mut().find(autocxx::c_int(9)) {
+                        reader.as_mut().getValueAsInteger()
+                    } else {
+                        0
+                    };
+                    let ask_price = if reader.as_mut().find(autocxx::c_int(207)) {
+                        reader.as_mut().getValueAsDouble()
+                    } else {
+                        0.0
+                    };
+                    let ask_size = if reader.as_mut().find(autocxx::c_int(791)) {
+                        reader.as_mut().getValueAsInteger()
+                    } else {
+                        0
+                    };
+                    let bid_price = if reader.as_mut().find(autocxx::c_int(218)) {
+                        reader.as_mut().getValueAsDouble()
+                    } else {
+                        0.0
+                    };
+                    let bid_size = if reader.as_mut().find(autocxx::c_int(790)) {
+                        reader.as_mut().getValueAsInteger()
+                    } else {
+                        0
+                    };
+                    let ts = if reader.as_mut().find(autocxx::c_int(18)) {
+                        reader.as_mut().getValueAsDouble()
+                    } else {
+                        0.0
+                    };
+
+                    let data = DataSrc533 {
+                        symbol: event.getSymbol().to_string(),
+                        ts: ts,
+                        ask_price: ask_price,
+                        ask_size: ask_size,
+                        bid_price: bid_price,
+                        bid_size: bid_size,
+                        price: price,
+                        volume: volume,
+                    };
+                    println!("snap data: {:?}", data);
+                    let symbol = event.getSymbol().to_string();
+                    self.maps.insert(symbol, data);
+                    println!("map lens: {}", self.maps.len());
+                    // let symbol = event.getSymbol().to_string();
+                    // let v = self.maps.get(&symbol).unwrap();
+                    // println!("get data: {:?}", *v);
+                };
             }
             cfapi::MessageEvent_Types::UPDATE => {
-                println!("Update Event");
+                let src = event.getSource();
+                let symbol = event.getSymbol();
+                println!("Update Event for source: {:?} symbol: {:?}", src, symbol);
+                if src == autocxx::c_int(533) {
+                    let reader = GetEventReader(event) as *mut cfapi::MessageReader;
+                    let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+                    if let Some(mut data) = self.maps.get_mut(symbol.to_str().unwrap()) {
+                        println!("ref data: {:?}", *data);
+                        if reader.as_mut().find(autocxx::c_int(8)) {
+                            println!("update price: {}", reader.as_mut().getValueAsDouble());
+                            (*data).price = reader.as_mut().getValueAsDouble()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(9)) {
+                            println!("update volume: {}", reader.as_mut().getValueAsInteger());
+                            (*data).volume = reader.as_mut().getValueAsInteger()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(10)) {
+                            println!("update ask price: {}", reader.as_mut().getValueAsDouble());
+                            (*data).ask_price = reader.as_mut().getValueAsDouble()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(11)) {
+                            println!("update ask size: {}", reader.as_mut().getValueAsInteger());
+                            (*data).ask_size = reader.as_mut().getValueAsInteger()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(12)) {
+                            println!("update bid price: {}", reader.as_mut().getValueAsDouble());
+                            (*data).bid_price = reader.as_mut().getValueAsDouble()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(13)) {
+                            println!("update bid size: {}", reader.as_mut().getValueAsInteger());
+                            (*data).bid_size = reader.as_mut().getValueAsInteger()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(14)) {
+                            println!("update price: {}", reader.as_mut().getValueAsDouble());
+                            (*data).price = reader.as_mut().getValueAsDouble()
+                        }
+                        if reader.as_mut().find(autocxx::c_int(16)) {
+                            (*data).ts = reader.as_mut().getValueAsDouble()
+                        }
+                        // *data = DataSrc533 {
+                        //     symbol: data.symbol.clone(),
+                        //     ts: if reader.as_mut().find(autocxx::c_int(16)) {
+                        //         reader.as_mut().getValueAsDouble()
+                        //     } else {
+                        //         data.ts
+                        //     },
+                        //     ask_price: if reader.as_mut().find(autocxx::c_int(207)) {
+                        //         reader.as_mut().getValueAsDouble()
+                        //     } else {
+                        //         data.ask_price
+                        //     },
+                        //     ask_size: if reader.as_mut().find(autocxx::c_int(791)) {
+                        //         reader.as_mut().getValueAsInteger()
+                        //     } else {
+                        //         data.ask_size
+                        //     },
+                        //     bid_price: if reader.as_mut().find(autocxx::c_int(218)) {
+                        //         reader.as_mut().getValueAsDouble()
+                        //     } else {
+                        //         data.bid_price
+                        //     },
+                        //     bid_size: if reader.as_mut().find(autocxx::c_int(790)) {
+                        //         reader.as_mut().getValueAsInteger()
+                        //     } else {
+                        //         data.bid_size
+                        //     },
+                        //     price: if reader.as_mut().find(autocxx::c_int(8)) {
+                        //         reader.as_mut().getValueAsDouble()
+                        //     } else {
+                        //         data.price
+                        //     },
+                        //     volume: 0,
+                        // };
+                    }
+                    let data = self.maps.get(symbol.to_str().unwrap()).unwrap();
+                    println!("upd data: {:?}", *data);
+                }
+                
+            }
+            cfapi::MessageEvent_Types::REFRESH => {
+                println!("Refresh Event");
+                let src = event.getSource();
+                let symbol = event.getSymbol();
+                if src == autocxx::c_int(533) {
+                    let reader = GetEventReader(event) as *mut cfapi::MessageReader;
+                    let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+
+                    if let Some(mut data) = self.maps.get_mut(symbol.to_str().unwrap()) {
+                        println!("data: {:?}", *data);
+                        // if reader.as_mut().find(autocxx::c_int(207)) {
+                        //     (*data).ask_price = reader.as_mut().getValueAsDouble()
+                        // }
+                        *data = DataSrc533 {
+                            symbol: data.symbol.clone(),
+                            ts: if reader.as_mut().find(autocxx::c_int(16)) {
+                                reader.as_mut().getValueAsDouble()
+                            } else {
+                                data.ts
+                            },
+                            ask_price: if reader.as_mut().find(autocxx::c_int(207)) {
+                                reader.as_mut().getValueAsDouble()
+                            } else {
+                                data.ask_price
+                            },
+                            ask_size: if reader.as_mut().find(autocxx::c_int(791)) {
+                                reader.as_mut().getValueAsInteger()
+                            } else {
+                                data.ask_size
+                            },
+                            bid_price: if reader.as_mut().find(autocxx::c_int(218)) {
+                                reader.as_mut().getValueAsDouble()
+                            } else {
+                                data.bid_price
+                            },
+                            bid_size: if reader.as_mut().find(autocxx::c_int(790)) {
+                                reader.as_mut().getValueAsInteger()
+                            } else {
+                                data.bid_size
+                            },
+                            price: if reader.as_mut().find(autocxx::c_int(8)) {
+                                reader.as_mut().getValueAsDouble()
+                            } else {
+                                data.price
+                            },
+                            volume: 0,
+                        };
+                    }
+                    let data = self.maps.get(symbol.to_str().unwrap()).unwrap();
+                    println!("get data: {:?}", *data);
+                }
             }
             _ => {
                 println!("event_type: {}", event_type as i32);
             }
         }
-        let perm = event.getPermission();
-        println!("permission: {:?}", perm);
-        let src = event.getSource();
-        println!("source: {:?}", src);
-        let symbol = event.getSymbol();
-        println!("symbol: {:?}", symbol);
-        let reader = GetEventReader(event) as *mut cfapi::MessageReader;
-        let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
-        //cfapi::MessageReader::END_OF_MESSAGE
-        while reader.as_mut().next() != autocxx::c_int(-1) {
-            match reader.as_mut().getValueType() {
-                cfapi::ValueTypes::INT64 => {
-                    println!(
-                        "{}({})={}",
-                        reader.as_mut().getTokenName(),
-                        i32::from(reader.as_mut().getTokenNumber()),
-                        reader.as_mut().getValueAsInteger()
-                    );
-                }
-                cfapi::ValueTypes::DOUBLE => {
-                    println!(
-                        "{}({})={}",
-                        reader.as_mut().getTokenName(),
-                        i32::from(reader.as_mut().getTokenNumber()),
-                        reader.as_mut().getValueAsDouble()
-                    );
-                }
-                cfapi::ValueTypes::STRING => {
-                    println!(
-                        "{}({})={}",
-                        reader.as_mut().getTokenName(),
-                        i32::from(reader.as_mut().getTokenNumber()),
-                        reader.as_mut().getValueAsString()
-                    );
-                }
-                cfapi::ValueTypes::DATETIME => {
-                    let d = GetDate(&reader.as_ref()) as *mut cfapi::Date;
-                    let t = GetTime(&reader.as_ref()) as *mut cfapi::Time;
-                    let mut d = unsafe { std::pin::Pin::new_unchecked(&mut *d) };
-                    let mut t = unsafe { std::pin::Pin::new_unchecked(&mut *t) };
-                    let y = d.as_mut().year();
-                    let m = d.as_mut().month();
-                    let d = d.as_mut().day();
-                    let h = t.as_mut().hour();
-                    let min = t.as_mut().minute();
-                    let s = t.as_mut().second();
-                    let ms =
-                        (t.as_mut().millisecond() as i32 * 1000) + t.as_mut().microsecond() as i32;
-                    println!(
-                        "{}({})=datetime {}-{:02}-{:02} {:02}:{:02}:{:02}.{:06} UTC({})",
-                        reader.as_mut().getTokenName(),
-                        i32::from(reader.as_mut().getTokenNumber()),
-                        y,
-                        m,
-                        d,
-                        h,
-                        min,
-                        s,
-                        ms,
-                        reader.as_mut().getValueAsDouble(),
-                    );
-                }
-                _ => {
-                    println!(
-                        "{}({})=unknown type",
-                        reader.as_mut().getTokenName(),
-                        i32::from(reader.as_mut().getTokenNumber()),
-                    );
+        if self.debug {
+            let perm = event.getPermission();
+            println!("permission: {:?}", perm);
+            // let src = event.getSource();
+            // println!("source: {:?}", src);
+
+            let symbol = event.getSymbol();
+            println!("symbol: {:?}", symbol);
+            let reader = GetEventReader(event) as *mut cfapi::MessageReader;
+            let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+            //cfapi::MessageReader::END_OF_MESSAGE
+            reader.as_mut().find(autocxx::c_int(3)); // reset to first field
+            while reader.as_mut().next() != autocxx::c_int(-1) {
+                match reader.as_mut().getValueType() {
+                    cfapi::ValueTypes::INT64 => {
+                        println!(
+                            "{}({})={}",
+                            reader.as_mut().getTokenName(),
+                            i32::from(reader.as_mut().getTokenNumber()),
+                            reader.as_mut().getValueAsInteger()
+                        );
+                    }
+                    cfapi::ValueTypes::DOUBLE => {
+                        println!(
+                            "{}({})={}",
+                            reader.as_mut().getTokenName(),
+                            i32::from(reader.as_mut().getTokenNumber()),
+                            reader.as_mut().getValueAsDouble()
+                        );
+                    }
+                    cfapi::ValueTypes::STRING => {
+                        println!(
+                            "{}({})={}",
+                            reader.as_mut().getTokenName(),
+                            i32::from(reader.as_mut().getTokenNumber()),
+                            reader.as_mut().getValueAsString()
+                        );
+                    }
+                    cfapi::ValueTypes::DATETIME => {
+                        let d = GetDate(&reader.as_ref()) as *mut cfapi::Date;
+                        let t = GetTime(&reader.as_ref()) as *mut cfapi::Time;
+                        let mut d = unsafe { std::pin::Pin::new_unchecked(&mut *d) };
+                        let mut t = unsafe { std::pin::Pin::new_unchecked(&mut *t) };
+                        let y = d.as_mut().year();
+                        let m = d.as_mut().month();
+                        let d = d.as_mut().day();
+                        let h = t.as_mut().hour();
+                        let min = t.as_mut().minute();
+                        let s = t.as_mut().second();
+                        let ms = (t.as_mut().millisecond() as i32 * 1000)
+                            + t.as_mut().microsecond() as i32;
+                        println!(
+                            "{}({})=datetime {}-{:02}-{:02} {:02}:{:02}:{:02}.{:06} UTC({})",
+                            reader.as_mut().getTokenName(),
+                            i32::from(reader.as_mut().getTokenNumber()),
+                            y,
+                            m,
+                            d,
+                            h,
+                            min,
+                            s,
+                            ms,
+                            reader.as_mut().getValueAsDouble(),
+                        );
+                    }
+                    _ => {
+                        println!(
+                            "{}({})=unknown type",
+                            reader.as_mut().getTokenName(),
+                            i32::from(reader.as_mut().getTokenNumber()),
+                        );
+                    }
                 }
             }
         }
+
         println!("<EXT>");
     }
 }
@@ -268,6 +490,7 @@ fn main() {
     let user_event_handler = MyUserEventHandler::default_rust_owned();
     let session_event_handler = MySessionEventHandler::default_rust_owned();
     let message_event_handler = MyMessageEventHandler::default_rust_owned();
+    message_event_handler.as_ref().borrow_mut().debug = false;
     // let pin_user_event_handler: Pin<&mut cfapi::UserEventHandler> =
     //     unsafe { std::pin::Pin::new_unchecked(user_event_handler as &mut cfapi::UserEventHandler) };
     // let pin_session_event_handler: Pin<&mut cfapi::SessionEventHandler> =
@@ -312,15 +535,22 @@ fn main() {
     // );
 
     api.pin_mut().startSession();
-    let_cxx_string!(src_id = "533");
-    let_cxx_string!(symbol = "AAPL");
-    let req = api.pin_mut()
-        .sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBE );
-    println!("req: {}", req);
     // let_cxx_string!(src_id = "533");
-    // let_cxx_string!(symbol = "{^A}");
-    // api.pin_mut().sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
-    std::thread::sleep(std::time::Duration::from_secs(30*60));
+    // let_cxx_string!(symbol = "AAPL");
+    // let req = api
+    //     .pin_mut()
+    //     .sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBE);
+    // println!("req: {}", req);
+    let_cxx_string!(src_id = "533");
+    let_cxx_string!(symbol = "{^A}");
+    let req = api.pin_mut().sendRequest(
+        &src_id,
+        &symbol,
+        cfapi::Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
+        // cfapi::Commands::QUERYWILDCARD,
+    );
+    println!("req: {}", req);
+    std::thread::sleep(std::time::Duration::from_secs(30 * 60));
     // let mut session = api.pin_mut().getSession();
     // let mut session_config = session.getSessionConfig();//.pin_mut().getSessionConfig();
 
