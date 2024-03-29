@@ -1,10 +1,17 @@
 // Use all the autocxx types which might be handy.
 use autocxx::prelude::*;
 // use autocxx::subclass::prelude::*;
+use ahash::RandomState;
 use autocxx::subclass::*;
+use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use cxx::let_cxx_string;
 use dashmap::DashMap;
+use rsolace::solclient::{SessionProps, SolClient};
+use rsolace::solmsg::SolMsg;
+use rsolace::types::SolClientLogLevel;
 use serde::{Deserialize, Serialize};
+use tracing::{debug, info, span, Level};
+use tracing_subscriber;
 // use cxx::{}
 
 // include_cpp! {
@@ -67,7 +74,7 @@ include_cpp! {
 }
 use ffi::*;
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataSrc533 {
     symbol: String,
     ts: f64,
@@ -86,13 +93,13 @@ pub struct MyUserEventHandler;
 impl cfapi::UserEventHandler_methods for MyUserEventHandler {
     fn onUserEvent(&mut self, event: &cfapi::UserEvent) {
         let event_type = event.getType();
-        println!("on event: {:?}", event.getRetCode());
+        debug!("on event: {:?}", event.getRetCode());
         match event_type {
             cfapi::UserEvent_Types::AUTHORIZATION_FAILURE => {
-                println!("AUTHORIZATION_FAILURE");
+                info!("AUTHORIZATION_FAILURE");
             }
             cfapi::UserEvent_Types::AUTHORIZATION_SUCCESS => {
-                println!("AUTHORIZATION_SUCCESS");
+                info!("AUTHORIZATION_SUCCESS");
             }
         }
     }
@@ -107,56 +114,56 @@ impl cfapi::SessionEventHandler_methods for MySessionEventHandler {
         let event_type = event.getType() as cfapi::SessionEvent_Types; // as cfapi::SessionEvent::Types
         match event_type {
             cfapi::SessionEvent_Types::CFAPI_SESSION_UNAVAILABLE => {
-                println!("session unavailable");
+                info!("session unavailable");
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_ESTABLISHED => {
-                println!("session established");
+                info!("session established");
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_RECOVERY => {
-                println!("session recovery");
+                info!("session recovery");
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_RECOVERY_SOURCES => {
-                println!("session recovery sourceID = {:?}", event.getSourceID());
+                info!("session recovery sourceID = {:?}", event.getSourceID());
             }
             cfapi::SessionEvent_Types::CFAPI_CDD_LOADED => {
-                println!("cdd loaded version: {}", event.getCddVersion());
+                info!("cdd loaded version: {}", event.getCddVersion());
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_AVAILABLE_ALLSOURCES => {
                 let source_id = event.getSourceID();
-                println!("session available all sources sourceID = {:?}", source_id);
+                info!("session available all sources sourceID = {:?}", source_id);
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_AVAILABLE_SOURCES => {
                 let source_id = event.getSourceID();
-                println!("session available sources sourceID = {:?}", source_id);
+                info!("session available sources sourceID = {:?}", source_id);
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_RECEIVE_QUEUE_ABOVE_THRESHOLD => {
-                println!(
+                info!(
                     "session receive queue above threshold {:?}",
                     event.getQueueDepth()
                 );
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_RECEIVE_QUEUE_BELOW_THRESHOLD => {
-                println!(
+                info!(
                     "session receive queue below threshold {:?}",
                     event.getQueueDepth()
                 );
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_JIT_START_CONFLATING => {
-                println!("session jit start conflation");
+                info!("session jit start conflation");
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_JIT_STOP_CONFLATING => {
-                println!("session jit stop conflation");
+                info!("session jit stop conflation");
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_SOURCE_ADDED => {
-                println!("session source added sourceID = {:?}", event.getSourceID());
+                info!("session source added sourceID = {:?}", event.getSourceID());
             }
             cfapi::SessionEvent_Types::CFAPI_SESSION_SOURCE_REMOVED => {
-                println!(
+                info!(
                     "session source removed sourceID = {:?}",
                     event.getSourceID()
                 );
             } // _ => {
-              //     println!("Ubknown event type");
+              //     info!("Ubknown event type");
               // }
         }
     }
@@ -165,18 +172,21 @@ impl cfapi::SessionEventHandler_methods for MySessionEventHandler {
 #[subclass]
 #[derive(Default)]
 pub struct MyMessageEventHandler {
-    pub maps: DashMap<String, DataSrc533>,
+    pub maps: DashMap<String, DataSrc533, RandomState>,
+    pub sender: Option<Sender<DataSrc533>>,
     pub debug: bool,
 }
 
 impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
     fn onMessageEvent(&mut self, event: &cfapi::MessageEvent) {
-        println!("onMessageEvent");
+        // info!("onMessageEvent");
+        let span = span!(Level::DEBUG, "onMessageEvent");
+        let _enter = span.enter();
         let event_type = event.getType() as cfapi::MessageEvent_Types;
         match event_type {
             // cfapi::MessageEvent_Types::STATUS | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
             cfapi::MessageEvent_Types::IMAGE_PART | cfapi::MessageEvent_Types::IMAGE_COMPLETE => {
-                println!(
+                info!(
                     "event type: {}",
                     match event_type {
                         cfapi::MessageEvent_Types::IMAGE_PART => "IMAGE_PART",
@@ -186,8 +196,8 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                     }
                 );
                 if self.debug {
-                    println!("get respones tag: {:?}", event.getTag());
-                    println!(
+                    info!("get respones tag: {:?}", event.getTag());
+                    info!(
                         "Status code={:?} ({}) for tag {}",
                         event.getStatusCode(),
                         event.getStatusString(),
@@ -196,7 +206,7 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                 }
                 let src = event.getSource();
                 if src == autocxx::c_int(533) {
-                    println!("source: {:?}", src);
+                    info!("source: {:?}", src);
                     let reader = GetEventReader(event) as *mut cfapi::MessageReader;
                     let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
 
@@ -246,50 +256,58 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                         price: price,
                         volume: volume,
                     };
-                    println!("snap data: {:?}", data);
+                    info!("snap data: {:?}", data);
                     let symbol = event.getSymbol().to_string();
-                    self.maps.insert(symbol, data);
-                    println!("map lens: {}", self.maps.len());
+                    self.maps.insert(symbol, data.clone());
+                    debug!("map lens: {}", self.maps.len());
+                    match self.sender {
+                        Some(ref s) => {
+                            s.send(data).unwrap();
+                        }
+                        None => {
+                            info!("sender is none");
+                        }
+                    }
                     // let symbol = event.getSymbol().to_string();
                     // let v = self.maps.get(&symbol).unwrap();
-                    // println!("get data: {:?}", *v);
+                    // info!("get data: {:?}", *v);
                 };
             }
             cfapi::MessageEvent_Types::UPDATE => {
                 let src = event.getSource();
                 let symbol = event.getSymbol();
-                println!("Update Event for source: {:?} symbol: {:?}", src, symbol);
+                info!("Update Event for source: {:?} symbol: {:?}", src, symbol);
                 if src == autocxx::c_int(533) {
                     let reader = GetEventReader(event) as *mut cfapi::MessageReader;
                     let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
                     if let Some(mut data) = self.maps.get_mut(symbol.to_str().unwrap()) {
-                        println!("ref data: {:?}", *data);
+                        debug!("ref data: {:?}", *data);
                         if reader.as_mut().find(autocxx::c_int(8)) {
-                            println!("update price: {}", reader.as_mut().getValueAsDouble());
+                            debug!("update price: {}", reader.as_mut().getValueAsDouble());
                             (*data).price = reader.as_mut().getValueAsDouble()
                         }
                         if reader.as_mut().find(autocxx::c_int(9)) {
-                            println!("update volume: {}", reader.as_mut().getValueAsInteger());
+                            debug!("update volume: {}", reader.as_mut().getValueAsInteger());
                             (*data).volume = reader.as_mut().getValueAsInteger()
                         }
                         if reader.as_mut().find(autocxx::c_int(10)) {
-                            println!("update ask price: {}", reader.as_mut().getValueAsDouble());
+                            debug!("update ask price: {}", reader.as_mut().getValueAsDouble());
                             (*data).ask_price = reader.as_mut().getValueAsDouble()
                         }
                         if reader.as_mut().find(autocxx::c_int(11)) {
-                            println!("update ask size: {}", reader.as_mut().getValueAsInteger());
+                            info!("update ask size: {}", reader.as_mut().getValueAsInteger());
                             (*data).ask_size = reader.as_mut().getValueAsInteger()
                         }
                         if reader.as_mut().find(autocxx::c_int(12)) {
-                            println!("update bid price: {}", reader.as_mut().getValueAsDouble());
+                            debug!("update bid price: {}", reader.as_mut().getValueAsDouble());
                             (*data).bid_price = reader.as_mut().getValueAsDouble()
                         }
                         if reader.as_mut().find(autocxx::c_int(13)) {
-                            println!("update bid size: {}", reader.as_mut().getValueAsInteger());
+                            info!("update bid size: {}", reader.as_mut().getValueAsInteger());
                             (*data).bid_size = reader.as_mut().getValueAsInteger()
                         }
                         if reader.as_mut().find(autocxx::c_int(14)) {
-                            println!("update price: {}", reader.as_mut().getValueAsDouble());
+                            debug!("update price: {}", reader.as_mut().getValueAsDouble());
                             (*data).price = reader.as_mut().getValueAsDouble()
                         }
                         if reader.as_mut().find(autocxx::c_int(16)) {
@@ -331,12 +349,11 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                         // };
                     }
                     let data = self.maps.get(symbol.to_str().unwrap()).unwrap();
-                    println!("upd data: {:?}", *data);
+                    info!("upd data: {:?}", *data);
                 }
-                
             }
             cfapi::MessageEvent_Types::REFRESH => {
-                println!("Refresh Event");
+                info!("Refresh Event");
                 let src = event.getSource();
                 let symbol = event.getSymbol();
                 if src == autocxx::c_int(533) {
@@ -344,7 +361,7 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                     let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
 
                     if let Some(mut data) = self.maps.get_mut(symbol.to_str().unwrap()) {
-                        println!("data: {:?}", *data);
+                        info!("data: {:?}", *data);
                         // if reader.as_mut().find(autocxx::c_int(207)) {
                         //     (*data).ask_price = reader.as_mut().getValueAsDouble()
                         // }
@@ -384,11 +401,11 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
                         };
                     }
                     let data = self.maps.get(symbol.to_str().unwrap()).unwrap();
-                    println!("get data: {:?}", *data);
+                    info!("get data: {:?}", *data);
                 }
             }
             _ => {
-                println!("event_type: {}", event_type as i32);
+                info!("event_type: {}", event_type as i32);
             }
         }
         if self.debug {
@@ -467,7 +484,8 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
             }
         }
 
-        println!("<EXT>");
+        // span.exit();
+        debug!("<EXT>");
     }
 }
 
@@ -478,10 +496,25 @@ impl cfapi::MessageEventHandler_methods for MyMessageEventHandler {
 // }
 
 fn main() {
-    println!("Hello, world! - C++ math should say 12={}", 12);
+    // tracing_subscriber::fmt::init();
+    let subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_span_events(
+            tracing_subscriber::fmt::format::FmtSpan::ENTER
+                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        )
+        // .with_target(false)
+        .with_max_level(Level::DEBUG)
+        .finish();
+    // .init();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+    info!("Hello, world! - C++ math should say 12={}", 12);
     // let obj = ffi::cfapi::APIFactory::getInstance() as *mut ffi::cfapi::APIFactory;
     // let obj =  obj as *mut ffi::cfapi::APIFactory;
     // let mut obj = unsafe { std::pin::Pin::new_unchecked(&mut *obj) };
+    let (sender, recviver) = unbounded();
     let_cxx_string!(app_name = "sample");
     let_cxx_string!(app_version = "1.0");
     let_cxx_string!(log_filename = "cfapilog");
@@ -491,6 +524,7 @@ fn main() {
     let session_event_handler = MySessionEventHandler::default_rust_owned();
     let message_event_handler = MyMessageEventHandler::default_rust_owned();
     message_event_handler.as_ref().borrow_mut().debug = false;
+    message_event_handler.as_ref().borrow_mut().sender = Some(sender);
     // let pin_user_event_handler: Pin<&mut cfapi::UserEventHandler> =
     //     unsafe { std::pin::Pin::new_unchecked(user_event_handler as &mut cfapi::UserEventHandler) };
     // let pin_session_event_handler: Pin<&mut cfapi::SessionEventHandler> =
@@ -535,21 +569,68 @@ fn main() {
     // );
 
     api.pin_mut().startSession();
-    // let_cxx_string!(src_id = "533");
-    // let_cxx_string!(symbol = "AAPL");
-    // let req = api
-    //     .pin_mut()
-    //     .sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBE);
-    // println!("req: {}", req);
     let_cxx_string!(src_id = "533");
-    let_cxx_string!(symbol = "{^A}");
-    let req = api.pin_mut().sendRequest(
-        &src_id,
-        &symbol,
-        cfapi::Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
-        // cfapi::Commands::QUERYWILDCARD,
-    );
-    println!("req: {}", req);
+    let_cxx_string!(symbol = "AAPL");
+    let req = api
+        .pin_mut()
+        .sendRequest(&src_id, &symbol, cfapi::Commands::QUERYSNAPANDSUBSCRIBE);
+    debug!("req: {}", req);
+    // let_cxx_string!(src_id = "533");
+    // let_cxx_string!(symbol = "{^A}");
+    // let req = api.pin_mut().sendRequest(
+    //     &src_id,
+    //     &symbol,
+    //     cfapi::Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
+    //     // cfapi::Commands::QUERYWILDCARD,
+    // );
+    // debug!("req: {}", req);
+    std::thread::spawn(move || {
+        let solclient = SolClient::new(SolClientLogLevel::Notice);
+        match solclient {
+            Ok(mut solclient) => {
+                let session_props = SessionProps::default()
+                    .host("128.110.5.101:55555")
+                    .vpn("sinopac")
+                    .username("shioaji")
+                    .password("shioaji111");
+                let r = solclient.connect(session_props);
+                info!("connect: {:?}", r);
+                let event_recv = solclient.get_event_receiver();
+                let _th_event = std::thread::spawn(move || loop {
+                    match event_recv.recv() {
+                        Ok(event) => {
+                            info!("{:?}", event);
+                        }
+                        Err(e) => {
+                            tracing::error!("recv event error: {:?}", e);
+                            break;
+                        }
+                    }
+                });
+                match recviver.recv() {
+                    Ok(data) => {
+                        info!("recv data: {:?}", data);
+                        let mut msg = SolMsg::new().unwrap();
+                        msg.set_topic("api/v1/test");
+                        let msgp_data = rmp_serde::to_vec_named(&data).unwrap();
+                        msg.set_binary_attachment(&msgp_data);
+                        // std::thread::sleep(std::time::Duration::from_secs(5));
+                        let rt = solclient.send_msg(&msg);
+                        info!("send msg: {:?}", rt);
+                    }
+                    Err(e) => {
+                        tracing::error!("recv error: {:?}", e);
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_secs(30 * 60));
+            }
+            Err(e) => {
+                info!("create solclient error: {:?}", e);
+            }
+        }
+    });
+
     std::thread::sleep(std::time::Duration::from_secs(30 * 60));
     // let mut session = api.pin_mut().getSession();
     // let mut session_config = session.getSessionConfig();//.pin_mut().getSessionConfig();
