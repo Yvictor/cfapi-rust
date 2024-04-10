@@ -13,6 +13,7 @@ name = "cfvhub"
 path = "src/lib.rs"
 
 [dependencies]
+cfapi = {path = "../cfapi" }
 ahash = "0.8.11"
 autocxx = "0.26.0"
 crossbeam-channel = "0.5.12"

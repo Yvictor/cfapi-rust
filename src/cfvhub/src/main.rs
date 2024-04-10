@@ -1,6 +1,9 @@
-fn main() {
-    println!("Hello, world!");
-}
+use cfapi::api::{CFAPI, CFAPIConfig};
+use cfapi::binding::Commands;
+use tracing::Level;
+use tracing_subscriber;
+
+
 // use cfapi_rust::cfapi::api::CFAPI;
 // use cfapi_rust::cfapi::binding::{Commands, UserEvent, UserEvent_Types};
 // use cfapi_rust::cfapi::user_event::UserEventHandlerExt;
@@ -28,40 +31,39 @@ fn main() {
 //     }
 // }
 
-// fn main() {
-//     // tracing_subscriber::fmt::init();
-//     let subscriber = tracing_subscriber::fmt()
-//         .compact()
-//         .with_line_number(true)
-//         .with_thread_ids(true)
-//         .with_span_events(
-//             tracing_subscriber::fmt::format::FmtSpan::ENTER
-//                 | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
-//         )
-//         // .with_target(false)
-//         .with_max_level(Level::DEBUG)
-//         .finish();
-//     // .init();
-//     tracing::subscriber::set_global_default(subscriber).unwrap();
-//     info!("Hello, world! - C++ math should say 12={}", 12);
+fn main() {
+    let subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_line_number(true)
+        .with_thread_ids(true)
+        .with_span_events(
+            tracing_subscriber::fmt::format::FmtSpan::ENTER
+                | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
+        )
+        // .with_target(false)
+        .with_max_level(Level::DEBUG)
+        .finish();
+        // .init();
+    tracing::subscriber::set_global_default(subscriber).unwrap();
+
 
 //     let user_event_handler = Box::new(MyUserEventHandler);
-//     let config = cfapi::api::CFAPIConfig::new(
-//         "sample".to_string(),
-//         "1.0".to_string(),
-//         false,
-//         "cfapilog".to_string(),
-//         "External".to_string(),
-//         "SINOPACNB".to_string(),
-//         "s1nopac".to_string(),
-//     );
-//     // let mut api = CFAPI::new(config, Some(user_event_handler));
-//     let mut api = CFAPI::new(config, vec![user_event_handler], vec![], vec![]);
-//     api.set_session_config(10);
-//     api.set_host_config("216.221.213.14:7022", false, true);
-//     api.start();
-//     api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
-//     api.request("534", "{^V}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    let config = CFAPIConfig::new(
+        "sample".to_string(),
+        "1.0".to_string(),
+        false,
+        "cfapilog".to_string(),
+        "External".to_string(),
+        "SINOPACNB".to_string(),
+        "s1nopac".to_string(),
+    );
+
+    let mut api = CFAPI::new(config, vec![], vec![], vec![]);
+    api.set_session_config(10);
+    api.set_host_config("216.221.213.14:7022", false, true);
+    api.start();
+    api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
+    api.request("534", "{^V}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
 //     std::thread::spawn(move || {
 //         let solclient = SolClient::new(SolClientLogLevel::Notice);
 //         match solclient {
@@ -109,31 +111,6 @@ fn main() {
 //         }
 //     });
 
-//     std::thread::sleep(std::time::Duration::from_secs(30 * 60));
-//     // let mut session = api.pin_mut().getSession();
-//     // let mut session_config = session.getSessionConfig();//.pin_mut().getSessionConfig();
+    std::thread::sleep(std::time::Duration::from_secs(30 * 60));
 
-//     // api
-//     // ffi::cfapi::APIFactory::createSession(obj.as_mut(), &user_name, &password, &user_event_handler);
-//     // obj.as_mut().createSession(&user_name, &password, &user_event_handler);
-//     // obj.as_mut();
-
-//     // ffi::cfapi::APIFactory::initialize(&app_name, &app_version, true, &log_filename);
-//     // let mut instance = ffi::cfapi::APIFactory::getInstance();
-//     // instance.as_mut().unwrap().initialize("sample", "1.0.0", true, "cfapilog");
-//     // ffi::print_value(123);
-//     // println!("Hello, world! - C++ math should say 12={}", ffi::DoMath(4));
-//     // let mut goat = ffi::Goat::new().within_box();
-//     // goat.as_mut().add_a_horn();
-//     // goat.as_mut().add_a_horn();
-//     // assert_eq!(
-//     //     goat.describe().as_ref().unwrap().to_string_lossy(),
-//     //     "This goat has 2 horns."
-//     // );
-//     // assert_eq!(ffi::do_math(12, 13), 25);
-//     // print!("do_math: {}\n", ffi::do_math(20, 30));
-//     // let mut goat = ffi::Goat::new().within_unique_ptr(); // returns a cxx::UniquePtr, i.e. a std::unique_ptr
-//     // goat.pin_mut().add_a_horn();
-//     // goat.pin_mut().add_a_horn();
-//     // assert_eq!(goat.describe().as_ref().unwrap().to_string_lossy(), "This goat has 2 horns.");
-// }
+}
