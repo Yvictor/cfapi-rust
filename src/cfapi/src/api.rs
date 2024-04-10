@@ -1,10 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::message_event::MessageEventHandlerExt;
+use super::session_event::SessionEventHandlerExt;
 use super::user_event::UserEventHandlerExt;
-use crate::cfapi::binding::{APIFactoryWrap, BaseUserEventHandler, Commands};
-use crate::cfapi::binding::{MyMessageEventHandler, MySessionEventHandler};
-use autocxx::subclass::{CppSubclass, CppSubclassDefault};
+use crate::binding::{
+    APIFactoryWrap, BaseMessageEventHandler, BaseSessionEventHandler, BaseUserEventHandler,
+    Commands,
+};
+use autocxx::subclass::CppSubclass;
 use autocxx::WithinUniquePtr;
 use cxx::{let_cxx_string, UniquePtr};
 
@@ -43,26 +47,30 @@ impl CFAPIConfig {
 pub struct CFAPI {
     api: UniquePtr<APIFactoryWrap>,
     _user_event_handler: Rc<RefCell<BaseUserEventHandler>>,
-    _session_event_handler: Rc<RefCell<MySessionEventHandler>>,
-    _message_event_handler: Rc<RefCell<MyMessageEventHandler>>,
+    _session_event_handler: Rc<RefCell<BaseSessionEventHandler>>,
+    _message_event_handler: Rc<RefCell<BaseMessageEventHandler>>,
 }
 
 impl CFAPI {
     pub fn new(
         config: CFAPIConfig,
-        user_event_handler: Box<impl UserEventHandlerExt + 'static>,
+        user_event_handlers: Vec<Box<dyn UserEventHandlerExt + 'static>>,
+        session_event_handlers: Vec<Box<dyn SessionEventHandlerExt>>,
+        message_event_handlers: Vec<Box<dyn MessageEventHandlerExt>>,
     ) -> Self {
         let user_event_handler =
-            BaseUserEventHandler::new_rust_owned(BaseUserEventHandler::new(user_event_handler));
-        let session_event_handler = MySessionEventHandler::default_rust_owned();
-        let message_event_handler = MyMessageEventHandler::default_rust_owned();
-        message_event_handler.as_ref().borrow_mut().debug = false;
+            BaseUserEventHandler::new_rust_owned(BaseUserEventHandler::new(user_event_handlers));
+        let session_event_handler = BaseSessionEventHandler::new_rust_owned(
+            BaseSessionEventHandler::new(session_event_handlers),
+        );
+        let message_event_handler = BaseMessageEventHandler::new_rust_owned(
+            BaseMessageEventHandler::new(message_event_handlers),
+        );
         let_cxx_string!(app_name = config.app_name);
         let_cxx_string!(app_version = config.app_version);
         let_cxx_string!(log_filename = config.log_filename);
         let_cxx_string!(username = config.username);
         let_cxx_string!(password = config.password);
-        // message_event_handler.as_ref().borrow_mut().sender = Some(sender);
         let mut api = APIFactoryWrap::new(
             &app_name,
             &app_version,
@@ -83,12 +91,25 @@ impl CFAPI {
             _session_event_handler: session_event_handler,
             _message_event_handler: message_event_handler,
         }
-        // CFAPI {}
+    }
+
+    pub fn add_user_event_handler(&mut self, user_event_handler: Box<dyn UserEventHandlerExt>) {
+        self._user_event_handler
+            .as_ref()
+            .borrow_mut()
+            .add_user_event_handler(user_event_handler);
+    }
+
+    pub fn clear_user_event_handlers(&mut self) {
+        self._user_event_handler
+            .as_ref()
+            .borrow_mut()
+            .clear_user_event_handlers();
     }
 
     pub fn set_session_config(&mut self, max_user_threads: i64) {
         self.api.pin_mut().setSessionConfig(
-            crate::cfapi::binding::SessionConfig_Parameters::MAX_USER_THREADS_LONG,
+            crate::binding::SessionConfig_Parameters::MAX_USER_THREADS_LONG,
             autocxx::c_long(max_user_threads),
         );
     }

@@ -1,5 +1,5 @@
 use super::value::CFValue;
-use crate::cfapi::binding::{GetEventReader, MessageEvent, MessageEvent_Types, MessageReader, ValueTypes};
+use super::binding::{GetEventReader, MessageEvent, MessageEvent_Types, MessageReader, ValueTypes};
 use std::collections::BTreeMap;
 
 pub struct EventReaderSerConfig {
