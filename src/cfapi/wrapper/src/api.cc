@@ -59,6 +59,11 @@ void APIFactoryWrap::registerMessageEventHandler(const cfapi::MessageEventHandle
     (*session).registerMessageEventHandler(&const_cast<cfapi::MessageEventHandler &>(messageHandler));
 };
 
+void APIFactoryWrap::registerStatisticsEventHandler(const cfapi::StatisticsEventHandler &statsEH, int interval)
+{
+    (*session).registerStatisticsEventHandler(&const_cast<cfapi::StatisticsEventHandler &>(statsEH), interval);
+};
+
 std::int64_t APIFactoryWrap::sendRequest(const std::string &src_id, const std::string &symbol, cfapi::Commands command)
 {
     cfapi::Request &req = (*session).createRequest();

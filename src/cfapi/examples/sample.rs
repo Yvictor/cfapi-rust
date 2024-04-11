@@ -18,20 +18,7 @@ fn main() {
     // .init();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    let mut api = CFAPI::new(
-        CFAPIConfig::new(
-            "sample".to_string(),
-            "1.0".to_string(),
-            false,
-            "cfapilog".to_string(),
-            "External".to_string(),
-            "".to_string(),
-            "".to_string(),
-        ),
-        vec![],
-        vec![],
-        vec![],
-    );
+    let mut api = CFAPI::new(CFAPIConfig::default(), vec![], vec![], vec![], vec![]);
     let session_config = SessionConfig::default();
     let connection_config = ConnectionConfig::default();
     api.set_session_config(&session_config);

@@ -28,6 +28,7 @@ public:
     std::int64_t sendRequest(const std::string &src_id, const std::string &symbol, cfapi::Commands command);
     // void registerMessageEventHandler(cfapi::MessageEventHandler *messageHandler);
     void registerMessageEventHandler(const cfapi::MessageEventHandler &messageHandler);
+    void registerStatisticsEventHandler(const cfapi::StatisticsEventHandler &statsEH, int interval);
     // const cfapi::Session& getSession();
     // cfapi::Session *getSession();
 };

@@ -1,6 +1,7 @@
-use super::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
-use super::session_event::{DefaultSessionEventHandler, SessionEventHandlerExt};
 use super::user_event::{DefaultUserEventHandler, UserEventHandlerExt};
+use super::session_event::{DefaultSessionEventHandler, SessionEventHandlerExt};
+use super::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
+use super::stat_event::{StatisticsEventHandlerExt, DefaultStatisticsEventHandler};
 
 use autocxx::prelude::*;
 use autocxx::subclass::*;
@@ -26,6 +27,8 @@ include_cpp! {
     subclass!("cfapi::MessageEventHandler", BaseMessageEventHandler)
     generate!("cfapi::MessageEvent")
     generate!("cfapi::MessageReader")
+    generate!("cfapi::StatisticsEvent")
+    subclass!("cfapi::StatisticsEventHandler", BaseStatisticsEventHandler)
     generate!("cfapi::ValueTypes")
     generate!("cfapi::Commands")
     generate!("cfapi::DateTime")
@@ -185,6 +188,57 @@ impl cfapi::MessageEventHandler_methods for BaseMessageEventHandler {
     fn onMessageEvent(&mut self, event: &cfapi::MessageEvent) {
         for handler in &mut self.handlers {
             handler.on_message_event(event);
+        }
+    }
+}
+
+
+#[subclass]
+#[derive(Default)]
+pub struct BaseStatisticsEventHandler {
+    handlers: Vec<Box<dyn StatisticsEventHandlerExt + 'static>>,
+    with_default: bool,
+}
+
+impl BaseStatisticsEventHandler {
+    pub fn new(handlers: Vec<Box<dyn StatisticsEventHandlerExt + 'static>>) -> Self {
+        let mut me = Self::default();
+        let handlers = if handlers.is_empty() {
+            me.with_default = true;
+            vec![Box::new(DefaultStatisticsEventHandler) as Box<dyn StatisticsEventHandlerExt>]
+        } else {
+            me.with_default = false;
+            handlers
+        };
+        me.with_hanlder(handlers)
+    }
+    pub fn with_hanlder(
+        mut self,
+        handlers: Vec<Box<dyn StatisticsEventHandlerExt + 'static>>,
+    ) -> Self {
+        self.handlers = handlers;
+        self.with_default = false;
+        self
+    }
+
+    pub fn add_handler(&mut self, handler: Box<dyn StatisticsEventHandlerExt + 'static>) {
+        if self.with_default {
+            self.handlers.pop();
+            self.with_default = false;
+        };
+        self.handlers.push(handler);
+    }
+
+    pub fn clear_handlers(&mut self) {
+        self.handlers.clear();
+        self.with_default = false;
+    }
+}
+
+impl cfapi::StatisticsEventHandler_methods for BaseStatisticsEventHandler {
+    fn onStatisticsEvent(&mut self, event: &cfapi::StatisticsEvent) {
+        for handler in &mut self.handlers {
+            handler.on_statistics_event(event);
         }
     }
 }

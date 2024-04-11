@@ -1,13 +1,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::binding::{
+    APIFactoryWrap, BaseMessageEventHandler, BaseSessionEventHandler, BaseStatisticsEventHandler,
+    BaseUserEventHandler, Commands,
+};
 use super::message_event::MessageEventHandlerExt;
 use super::session_event::SessionEventHandlerExt;
+use super::stat_event::StatisticsEventHandlerExt;
 use super::user_event::UserEventHandlerExt;
-use crate::binding::{
-    APIFactoryWrap, BaseMessageEventHandler, BaseSessionEventHandler, BaseUserEventHandler,
-    Commands,
-};
 use autocxx::subclass::CppSubclass;
 use autocxx::WithinUniquePtr;
 use cxx::{let_cxx_string, UniquePtr};
@@ -20,6 +21,23 @@ pub struct CFAPIConfig {
     usage: String,
     username: String,
     password: String,
+    // interval in seconds to report statistics
+    statistics_interval: i32,
+}
+
+impl Default for CFAPIConfig {
+    fn default() -> Self {
+        CFAPIConfig::new(
+            "app".to_owned(),
+            "1.0".to_owned(),
+            false,
+            "cfapilog".to_owned(),
+            "External".to_owned(),
+            "username".to_owned(),
+            "password".to_owned(),
+            60,
+        )
+    }
 }
 
 impl CFAPIConfig {
@@ -31,6 +49,7 @@ impl CFAPIConfig {
         usage: String,
         username: String,
         password: String,
+        statistics_interval: i32,
     ) -> Self {
         CFAPIConfig {
             app_name,
@@ -40,7 +59,49 @@ impl CFAPIConfig {
             usage,
             username,
             password,
+            statistics_interval,
         }
+    }
+
+    pub fn with_app_name(mut self, app_name: &str) -> Self {
+        self.app_name = app_name.to_owned();
+        self
+    }
+
+    pub fn with_app_version(mut self, app_version: &str) -> Self {
+        self.app_version = app_version.to_owned();
+        self
+    }
+
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        self.debug = debug;
+        self
+    }
+
+    pub fn with_log_filename(mut self, log_filename: &str) -> Self {
+        self.log_filename = log_filename.to_owned();
+        self
+    }
+
+    /// Parameter "usage" is used for only internal purpose;
+    pub fn with_usage(mut self, usage: &String) -> Self {
+        self.usage = usage.to_owned();
+        self
+    }
+
+    pub fn with_username(mut self, username: &str) -> Self {
+        self.username = username.to_owned();
+        self
+    }
+
+    pub fn with_password(mut self, password: &str) -> Self {
+        self.password = password.to_owned();
+        self
+    }
+
+    pub fn with_statistics_interval(mut self, statistics_interval: i32) -> Self {
+        self.statistics_interval = statistics_interval;
+        self
     }
 }
 
@@ -244,6 +305,7 @@ pub struct CFAPI {
     _user_event_handler: Rc<RefCell<BaseUserEventHandler>>,
     _session_event_handler: Rc<RefCell<BaseSessionEventHandler>>,
     _message_event_handler: Rc<RefCell<BaseMessageEventHandler>>,
+    _statistics_event_handler: Rc<RefCell<BaseStatisticsEventHandler>>,
 }
 
 impl CFAPI {
@@ -252,6 +314,7 @@ impl CFAPI {
         user_event_handlers: Vec<Box<dyn UserEventHandlerExt + 'static>>,
         session_event_handlers: Vec<Box<dyn SessionEventHandlerExt>>,
         message_event_handlers: Vec<Box<dyn MessageEventHandlerExt>>,
+        statistics_event_handlers: Vec<Box<dyn StatisticsEventHandlerExt>>,
     ) -> Self {
         let user_event_handler =
             BaseUserEventHandler::new_rust_owned(BaseUserEventHandler::new(user_event_handlers));
@@ -260,6 +323,9 @@ impl CFAPI {
         );
         let message_event_handler = BaseMessageEventHandler::new_rust_owned(
             BaseMessageEventHandler::new(message_event_handlers),
+        );
+        let statistics_event_handler = BaseStatisticsEventHandler::new_rust_owned(
+            BaseStatisticsEventHandler::new(statistics_event_handlers),
         );
         let_cxx_string!(app_name = config.app_name);
         let_cxx_string!(app_version = config.app_version);
@@ -280,11 +346,16 @@ impl CFAPI {
         .within_unique_ptr();
         api.pin_mut()
             .registerMessageEventHandler(message_event_handler.as_ref().borrow().as_ref());
+        api.pin_mut().registerStatisticsEventHandler(
+            statistics_event_handler.as_ref().borrow().as_ref(),
+            autocxx::c_int(config.statistics_interval),
+        );
         CFAPI {
             api,
             _user_event_handler: user_event_handler,
             _session_event_handler: session_event_handler,
             _message_event_handler: message_event_handler,
+            _statistics_event_handler: statistics_event_handler,
         }
     }
 
@@ -331,6 +402,23 @@ impl CFAPI {
 
     pub fn clear_message_event_handlers(&mut self) {
         self._message_event_handler
+            .as_ref()
+            .borrow_mut()
+            .clear_handlers();
+    }
+
+    pub fn add_statistics_event_handler(
+        &mut self,
+        statistics_event_handler: Box<dyn StatisticsEventHandlerExt>,
+    ) {
+        self._statistics_event_handler
+            .as_ref()
+            .borrow_mut()
+            .add_handler(statistics_event_handler);
+    }
+
+    pub fn clear_statistics_event_handlers(&mut self) {
+        self._statistics_event_handler
             .as_ref()
             .borrow_mut()
             .clear_handlers();

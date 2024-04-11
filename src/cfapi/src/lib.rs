@@ -4,4 +4,5 @@ pub mod value;
 pub mod user_event;
 pub mod session_event;
 pub mod message_event;
+pub mod stat_event;
 pub mod api;
