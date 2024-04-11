@@ -107,6 +107,35 @@ impl CFAPI {
             .clear_user_event_handlers();
     }
 
+    pub fn add_session_event_handler(&mut self, session_event_handler: Box<dyn SessionEventHandlerExt>) {
+        self._session_event_handler
+            .as_ref()
+            .borrow_mut()
+            .add_handler(session_event_handler);
+    }
+
+    pub fn clear_session_event_handlers(&mut self) {
+        self._session_event_handler
+            .as_ref()
+            .borrow_mut()
+            .clear_handlers();
+    }
+
+    pub fn add_message_event_handler(&mut self, message_event_handler: Box<dyn MessageEventHandlerExt>) {
+        self._message_event_handler
+            .as_ref()
+            .borrow_mut()
+            .add_handler(message_event_handler);
+    }
+
+    pub fn clear_message_event_handlers(&mut self) {
+        self._message_event_handler
+            .as_ref()
+            .borrow_mut()
+            .clear_handlers();
+    }
+
+
     pub fn set_session_config(&mut self, max_user_threads: i64) {
         self.api.pin_mut().setSessionConfig(
             crate::binding::SessionConfig_Parameters::MAX_USER_THREADS_LONG,
