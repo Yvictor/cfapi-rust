@@ -1,4 +1,4 @@
-use cfapi::api::{CFAPIConfig, CFAPI};
+use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
 use tracing::Level;
 use tracing_subscriber;
@@ -32,8 +32,10 @@ fn main() {
         vec![],
         vec![],
     );
-    api.set_session_config(10);
-    api.set_host_config("216.221.213.14:7022", false, true);
+    let session_config = SessionConfig::default();
+    let connection_config = ConnectionConfig::default();
+    api.set_session_config(&session_config);
+    api.set_connection_config("216.221.213.14:7022", &connection_config);
     api.start();
     api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
     // api.request("534", "{^V}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);

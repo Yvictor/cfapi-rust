@@ -11,7 +11,7 @@ fn main() -> miette::Result<()> {
         .cpp_link_stdlib("pthread")
         .file("wrapper/src/api.cc")
         .compile("autocxx-cfapi"); // arbitrary library name, pick anything
-   
+    println!("cargo:rerun-if-changed=src/api.rs");
     println!("cargo:rerun-if-changed=src/binding.rs");
     println!("cargo:rerun-if-changed=src/user_event.rs");
     println!("cargo:rerun-if-changed=src/session_event.rs");

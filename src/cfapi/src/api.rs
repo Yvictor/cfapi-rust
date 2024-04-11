@@ -44,6 +44,201 @@ impl CFAPIConfig {
     }
 }
 
+/// SessionConfig
+/// multithreaded_api_connections: Indicate whether API should create mulitple threads to handle multiple CSP connections.  Default is false.
+/// max_user_threads: When multithreaded_api_connections=true, this indicates the maximum number of user-side threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+/// max_csp_threads: When multithreaded_api_connections=true, this indicates the maximum number of CSP-side (backend) threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+/// max_request_queue_size: Maximum number of requests to be queued before sending to the CSP.  Default is 100000 (without watchlist) or 10000000 (with watchlist); valid range is 100000-50000000 (requests). When the queue is full, any further send() requests will fail.
+/// watchlist: Indicate whether API should use watchlist to manage requests.  Default is false.
+/// max_watchlist_size: Maximum number of requests to be added to watchlist.  Default is 10000000 (requests).
+/// queue_depth_threshold_percent: Threshold to trigger CFAPI_SESSION_RECEIVE_QUEUE_ABOVE_THRESHOLD and CFAPI_SESSION_RECEIVE_QUEUE_BELOW_THRESHOLD SessionEvents.  Default is 70%; valid range is 1-101.
+pub struct SessionConfig {
+    /// Indicate whether API should create mulitple threads to handle multiple CSP connections.  Default is false.
+    pub multithreaded_api_connections: bool,
+    /// When multithreaded_api_connections=true, this indicates the maximum number of user-side threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+    pub max_user_threads: i64,
+    /// When multithreaded_api_connections=true, this indicates the maximum number of CSP-side (backend) threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+    pub max_csp_threads: i64,
+    /// Maximum number of requests to be queued before sending to the CSP.  Default is 100000 (without watchlist) or 10000000 (with watchlist); valid range is 100000-50000000 (requests)
+    /// When the queue is full, any further send() requests will fail.
+    pub max_request_queue_size: i64,
+    /// Indicate whether API should use watchlist to manage requests.  Default is false.
+    pub watchlist: bool,
+    /// Maximum number of requests to be added to watchlist.  Default is 10000000 (requests)
+    pub max_watchlist_size: i64,
+    /// Threshold to trigger CFAPI_SESSION_RECEIVE_QUEUE_ABOVE_THRESHOLD and CFAPI_SESSION_RECEIVE_QUEUE_BELOW_THRESHOLD SessionEvents.  Default is 70%; valid range is 1-101.
+    pub queue_depth_threshold_percent: i64,
+}
+
+impl SessionConfig {
+    /// Indicate whether API should create mulitple threads to handle multiple CSP connections.  Default is false.
+    pub fn with_multi_threaded_api_connections(
+        mut self,
+        multithreaded_api_connections: bool,
+    ) -> Self {
+        self.multithreaded_api_connections = multithreaded_api_connections;
+        self
+    }
+    /// When multithreaded_api_connections=true, this indicates the maximum number of user-side threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+    pub fn with_max_user_threads(mut self, max_user_threads: i64) -> Self {
+        self.max_user_threads = max_user_threads;
+        self
+    }
+    /// When multithreaded_api_connections=true, this indicates the maximum number of CSP-side (backend) threads the API should create.  If set to 0 (default), <0, or not set, the API will open as many threads as it can use.
+    pub fn with_max_csp_threads(mut self, max_csp_threads: i64) -> Self {
+        self.max_csp_threads = max_csp_threads;
+        self
+    }
+    /// Maximum number of requests to be queued before sending to the CSP.  Default is 100000 (without watchlist) or 10000000 (with watchlist); valid range is 100000-50000000 (requests)
+    /// When the queue is full, any further send() requests will fail.
+    pub fn with_max_request_queue_size(mut self, max_request_queue_size: i64) -> Self {
+        self.max_request_queue_size = max_request_queue_size;
+        self
+    }
+    /// Indicate whether API should use watchlist to manage requests.  Default is false.
+    pub fn with_watchlist(mut self, watchlist: bool) -> Self {
+        self.watchlist = watchlist;
+        self
+    }
+    /// Maximum number of requests to be added to watchlist.  Default is 10000000 (requests)
+    pub fn with_max_watchlist_size(mut self, max_watchlist_size: i64) -> Self {
+        self.max_watchlist_size = max_watchlist_size;
+        self
+    }
+    /// Threshold to trigger CFAPI_SESSION_RECEIVE_QUEUE_ABOVE_THRESHOLD and CFAPI_SESSION_RECEIVE_QUEUE_BELOW_THRESHOLD SessionEvents.  Default is 70%; valid range is 1-101.
+    pub fn with_queue_depth_threshold_percent(
+        mut self,
+        queue_depth_threshold_percent: i64,
+    ) -> Self {
+        self.queue_depth_threshold_percent = queue_depth_threshold_percent;
+        self
+    }
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        SessionConfig {
+            multithreaded_api_connections: false,
+            max_user_threads: 0,
+            max_csp_threads: 0,
+            max_request_queue_size: 100000,
+            watchlist: false,
+            max_watchlist_size: 10000000,
+            queue_depth_threshold_percent: 70,
+        }
+    }
+}
+
+pub struct ConnectionConfig {
+    /// Is this a backup CSP?  Default is false.
+    pub backup: bool,
+    /// Use compression between CSP and API. Default is true
+    pub compression: bool,
+    /// Indicate which messages are conflatable. Default is false
+    pub conflation_indicator: bool,
+    /// Maximum time to hold conflatable data (in milliseconds).  Default is 1000 (ms)
+    pub conflation_interval: i64,
+    /// Maximum time to wait for a heartbeat message from the CSP.  Default is 5 (seconds)
+    /// Note: during initialization, this is the maximum time to wait for any response from the CSP.
+    pub read_timeout: i64,
+    /// Maximum time to wait to establish a TCP connection to the CSP.  Default is 5 (seconds)
+    pub connection_timeout: i64,
+    /// Maximum number of consecutive reconnects to the CSP without successfully initializing.  Default is 5
+    pub connection_retry_limit: i64,
+    /// Size in megabytes of internal buffer for incoming messages from the CSP.  Default is 1 (megabyte); valid range is 1-256 (MB)
+    /// Note: there is one queue per backend CSP, so each one will be allocated with this size
+    pub queue_size: i64,
+    /// Maximum time socket select should block, waiting for a connection to be ready; Default is 200 millisec
+    pub blocking_connection_time_limit: i64,
+    /// Type of conflation.  1: trade-safe (Default); 2: intervalized; 3: Just-In-Time (JIT)
+    pub conflation_type: i64,
+    /// Threshold to trigger JIT conflation.  This is the percent of the buffer used before feed starts conflating. Default is 25%; valid range is 1-75.  Only valid when CONFLATION_TYPE_LONG is set to 3 (JIT).
+    pub jit_conflation_threshold_percent: i64,
+}
+
+impl Default for ConnectionConfig {
+    fn default() -> Self {
+        ConnectionConfig {
+            backup: false,
+            compression: true,
+            conflation_indicator: false,
+            conflation_interval: 1000,
+            read_timeout: 5,
+            connection_timeout: 5,
+            connection_retry_limit: 5,
+            queue_size: 1,
+            blocking_connection_time_limit: 200,
+            conflation_type: 1,
+            jit_conflation_threshold_percent: 25,
+        }
+    }
+}
+
+impl ConnectionConfig {
+    /// Is this a backup CSP?  Default is false.
+    pub fn with_backup(mut self, backup: bool) -> Self {
+        self.backup = backup;
+        self
+    }
+    /// Use compression between CSP and API.  Default is true
+    pub fn with_compression(mut self, compression: bool) -> Self {
+        self.compression = compression;
+        self
+    }
+    /// Indicate which messages are conflatable.  Default is false
+    pub fn with_conflation_indicator(mut self, conflation_indicator: bool) -> Self {
+        self.conflation_indicator = conflation_indicator;
+        self
+    }
+    /// Maximum time to hold conflatable data (in milliseconds).  Default is 1000 (ms)
+    /// Note: during initialization, this is the maximum time to wait for any response from the CSP.
+    pub fn with_conflation_interval(mut self, conflation_interval: i64) -> Self {
+        self.conflation_interval = conflation_interval;
+        self
+    }
+    /// Maximum time to wait for a heartbeat message from the CSP.  Default is 5 (seconds)
+    pub fn with_read_timeout(mut self, read_timeout: i64) -> Self {
+        self.read_timeout = read_timeout;
+        self
+    }
+    /// Maximum time to wait to establish a TCP connection to the CSP.  Default is 5 (seconds)
+    pub fn with_connection_timeout(mut self, connection_timeout: i64) -> Self {
+        self.connection_timeout = connection_timeout;
+        self
+    }
+    /// Maximum number of consecutive reconnects to the CSP without successfully initializing.  Default is 5
+    pub fn with_connection_retry_limit(mut self, connection_retry_limit: i64) -> Self {
+        self.connection_retry_limit = connection_retry_limit;
+        self
+    }
+    /// Size in megabytes of internal buffer for incoming messages from the CSP.  Default is 1 (megabyte); valid range is 1-256 (MB)
+    pub fn with_queue_size(mut self, queue_size: i64) -> Self {
+        self.queue_size = queue_size;
+        self
+    }
+    /// Maximum time socket select should block, waiting for a connection to be ready; Default is 200 millisec
+    pub fn with_blocking_connection_time_limit(
+        mut self,
+        blocking_connection_time_limit: i64,
+    ) -> Self {
+        self.blocking_connection_time_limit = blocking_connection_time_limit;
+        self
+    }
+    /// Type of conflation.  1: trade-safe (Default); 2: intervalized; 3: Just-In-Time (JIT)
+    pub fn with_conflation_type(mut self, conflation_type: i64) -> Self {
+        self.conflation_type = conflation_type;
+        self
+    }
+    /// Threshold to trigger JIT conflation.  This is the percent of the buffer used before feed starts conflating. Default is 25%; valid range is 1-75.  Only valid when CONFLATION_TYPE_LONG is set to 3 (JIT).
+    pub fn with_jit_conflation_threshold_percent(
+        mut self,
+        jit_conflation_threshold_percent: i64,
+    ) -> Self {
+        self.jit_conflation_threshold_percent = jit_conflation_threshold_percent;
+        self
+    }
+}
+
 pub struct CFAPI {
     api: UniquePtr<APIFactoryWrap>,
     _user_event_handler: Rc<RefCell<BaseUserEventHandler>>,
@@ -107,7 +302,10 @@ impl CFAPI {
             .clear_user_event_handlers();
     }
 
-    pub fn add_session_event_handler(&mut self, session_event_handler: Box<dyn SessionEventHandlerExt>) {
+    pub fn add_session_event_handler(
+        &mut self,
+        session_event_handler: Box<dyn SessionEventHandlerExt>,
+    ) {
         self._session_event_handler
             .as_ref()
             .borrow_mut()
@@ -121,7 +319,10 @@ impl CFAPI {
             .clear_handlers();
     }
 
-    pub fn add_message_event_handler(&mut self, message_event_handler: Box<dyn MessageEventHandlerExt>) {
+    pub fn add_message_event_handler(
+        &mut self,
+        message_event_handler: Box<dyn MessageEventHandlerExt>,
+    ) {
         self._message_event_handler
             .as_ref()
             .borrow_mut()
@@ -135,19 +336,53 @@ impl CFAPI {
             .clear_handlers();
     }
 
-
-    pub fn set_session_config(&mut self, max_user_threads: i64) {
-        self.api.pin_mut().setSessionConfig(
+    pub fn set_session_config(&mut self, session_config: &SessionConfig) {
+        self.api.pin_mut().setSessionConfigBool(
+            crate::binding::SessionConfig_Parameters::MULTITHREADED_API_CONNECTIONS_BOOL,
+            session_config.multithreaded_api_connections,
+        );
+        self.api.pin_mut().setSessionConfigInt(
             crate::binding::SessionConfig_Parameters::MAX_USER_THREADS_LONG,
-            autocxx::c_long(max_user_threads),
+            autocxx::c_long(session_config.max_user_threads),
+        );
+        self.api.pin_mut().setSessionConfigInt(
+            crate::binding::SessionConfig_Parameters::MAX_CSP_THREADS_LONG,
+            autocxx::c_long(session_config.max_csp_threads),
+        );
+        self.api.pin_mut().setSessionConfigInt(
+            crate::binding::SessionConfig_Parameters::MAX_REQUEST_QUEUE_SIZE_LONG,
+            autocxx::c_long(session_config.max_request_queue_size),
+        );
+        self.api.pin_mut().setSessionConfigBool(
+            crate::binding::SessionConfig_Parameters::WATCHLIST_BOOL,
+            session_config.watchlist,
+        );
+        self.api.pin_mut().setSessionConfigInt(
+            crate::binding::SessionConfig_Parameters::MAX_WATCHLIST_SIZE_LONG,
+            autocxx::c_long(session_config.max_watchlist_size),
+        );
+        self.api.pin_mut().setSessionConfigInt(
+            crate::binding::SessionConfig_Parameters::QUEUE_DEPTH_THRESHOLD_PERCENT_LONG,
+            autocxx::c_long(session_config.queue_depth_threshold_percent),
         );
     }
 
-    pub fn set_host_config(&mut self, host_info: &str, backup: bool, compression: bool) {
+    pub fn set_connection_config(&mut self, host_info: &str, connection_config: &ConnectionConfig) {
         let_cxx_string!(host_info = host_info);
-        self.api
-            .pin_mut()
-            .setHostConfig(host_info, backup, compression);
+        self.api.pin_mut().setConnectionConfig(
+            host_info,
+            connection_config.backup,
+            connection_config.compression,
+            connection_config.conflation_indicator,
+            autocxx::c_long(connection_config.conflation_interval),
+            autocxx::c_long(connection_config.read_timeout),
+            autocxx::c_long(connection_config.connection_timeout),
+            autocxx::c_long(connection_config.connection_retry_limit),
+            autocxx::c_long(connection_config.queue_size),
+            autocxx::c_long(connection_config.blocking_connection_time_limit),
+            autocxx::c_long(connection_config.conflation_type),
+            autocxx::c_long(connection_config.jit_conflation_threshold_percent),
+        );
     }
 
     pub fn start(&mut self) {

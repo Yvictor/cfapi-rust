@@ -20,25 +20,39 @@ APIFactoryWrap::~APIFactoryWrap()
     cfapi::APIFactory::getInstance()->uninitialize();
 };
 
-void APIFactoryWrap::setSessionConfig(cfapi::SessionConfig::Parameters param, long value)
+void APIFactoryWrap::setSessionConfigInt(cfapi::SessionConfig::Parameters param, long value)
 {
     cfapi::SessionConfig &sessionConfig = (*session).getSessionConfig();
     sessionConfig.set(param, value);
 };
 
-void APIFactoryWrap::setConnectionConfig(cfapi::HostConfig::Parameters param, long value)
+void APIFactoryWrap::setSessionConfigBool(cfapi::SessionConfig::Parameters param, bool value)
 {
-    cfapi::ConnectionConfig &connectionConfig = (*session).getConnectionConfig();
-    connectionConfig.set(param, value);
+    cfapi::SessionConfig &sessionConfig = (*session).getSessionConfig();
+    sessionConfig.set(param, value);
 };
 
-void APIFactoryWrap::setHostConfig(std::string &host_info, bool backup, bool compression)
+void APIFactoryWrap::setConnectionConfig(std::string &host_info, bool backup,
+                                         bool compression, bool conflation_indicator, long conflation_interval,
+                                         long read_timeout, long connection_timeout, long connection_retry_limit,
+                                         long queue_size, long blocking_connection_time_limit,
+                                         long conflation_type, long jit_conflation_threshold_percent)
 {
     cfapi::ConnectionConfig &connectionConfig = (*session).getConnectionConfig();
     cfapi::HostConfig &hostConfig = connectionConfig.getHostConfig(host_info);
     hostConfig.set(cfapi::HostConfig::BACKUP_BOOL, backup);
     hostConfig.set(cfapi::HostConfig::COMPRESSION_BOOL, compression);
+    hostConfig.set(cfapi::HostConfig::CONFLATION_INDICATOR_BOOL, conflation_indicator);
+    hostConfig.set(cfapi::HostConfig::CONFLATION_INTERVAL_LONG, conflation_interval);
+    hostConfig.set(cfapi::HostConfig::READ_TIMEOUT_LONG, read_timeout);
+    hostConfig.set(cfapi::HostConfig::CONNECTION_TIMEOUT_LONG, connection_timeout);
+    hostConfig.set(cfapi::HostConfig::CONNECTION_RETRY_LIMIT_LONG, connection_retry_limit);
+    hostConfig.set(cfapi::HostConfig::QUEUE_SIZE_LONG, queue_size);
+    hostConfig.set(cfapi::HostConfig::BLOCKING_CONNECTION_TIME_LIMIT_LONG, blocking_connection_time_limit);
+    hostConfig.set(cfapi::HostConfig::CONFLATION_TYPE_LONG, conflation_type);
+    hostConfig.set(cfapi::HostConfig::JIT_CONFLATION_THRESHOLD_PERCENT_LONG, jit_conflation_threshold_percent);
 };
+
 
 void APIFactoryWrap::registerMessageEventHandler(const cfapi::MessageEventHandler &messageHandler)
 {
