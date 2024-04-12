@@ -1,8 +1,16 @@
 use super::formater::{Formated, FormaterExt};
 use serde::Serialize;
-use std::fs::OpenOptions;
+use snafu::{prelude::Snafu, ResultExt};
 use std::io::prelude::Write;
+use std::{fs::OpenOptions, io};
 use tracing::error;
+
+#[derive(Debug, Snafu)]
+pub enum SinkError {
+    #[snafu(display("DiskSink Readfile Error: {}", source))]
+    DiskSinkReadFile { source: io::Error },
+}
+
 pub trait SinkExt<In>
 where
     In: Serialize,
@@ -14,19 +22,19 @@ where
 }
 
 pub struct DiskSink {
-    path: std::path::PathBuf,
+    pub path: std::path::PathBuf,
     file: std::fs::File,
 }
 
 impl DiskSink {
-    pub fn new(path: std::path::PathBuf) -> Self {
+    pub fn new(path: std::path::PathBuf) -> Result<Self, SinkError> {
         let file = OpenOptions::new()
             .write(true)
             .create(true)
             .append(true)
             .open(path.clone())
-            .unwrap();
-        Self { path, file }
+            .context(DiskSinkReadFileSnafu)?;
+        Ok(Self { path, file })
     }
 }
 

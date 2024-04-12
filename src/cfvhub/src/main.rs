@@ -52,7 +52,7 @@ fn main() {
     let pipe_message_handler = PipeMessageHandler::new(
         BTreeMapConvertor::default(),
         JsonFormater {},
-        DiskSink::new("record.json".into()),
+        DiskSink::new("record.json".into()).unwrap(),
     );
 
     let config = CFAPIConfig::default()
