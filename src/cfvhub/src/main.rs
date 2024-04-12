@@ -1,5 +1,9 @@
 use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
+use cfvhub::convertor::BTreeMapConvertor;
+use cfvhub::formater::JsonFormater;
+use cfvhub::pipe::PipeMessageHandler;
+use cfvhub::sink::DiskSink;
 use tracing::Level;
 use tracing_subscriber;
 
@@ -45,22 +49,30 @@ fn main() {
     // .init();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
-    //     let user_event_handler = Box::new(MyUserEventHandler);
-    let config = CFAPIConfig::new(
-        "sample".to_string(),
-        "1.0".to_string(),
-        false,
-        "cfapilog".to_string(),
-        "External".to_string(),
-        "SINOPACNB".to_string(),
-        "s1nopac".to_string(),
+    let pipe_message_handler = PipeMessageHandler::new(
+        BTreeMapConvertor::default(),
+        JsonFormater {},
+        DiskSink::new("record.json".into()),
     );
+
+    let config = CFAPIConfig::default()
+        .with_app_name("sample")
+        .with_app_version("1.0")
+        .with_username("SINOPACNB")
+        .with_password("s1nopac")
+        .with_statistics_interval(5 * 60);
     let session_config = SessionConfig::default()
         .with_multi_threaded_api_connections(true)
         .with_max_user_threads(12);
     let main_connection_config = ConnectionConfig::default();
     // let backup_connection_config = ConnectionConfig::default().with_backup(true);
-    let mut api = CFAPI::new(config, vec![], vec![], vec![]);
+    let mut api = CFAPI::new(
+        config,
+        vec![],
+        vec![],
+        vec![Box::new(pipe_message_handler)],
+        vec![],
+    );
     api.set_session_config(&session_config);
     api.set_connection_config("216.221.213.14:7022", &main_connection_config);
     // api.set_connection_config("216.221.213.14:7022", &backup_connection_config);

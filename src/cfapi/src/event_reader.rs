@@ -30,23 +30,24 @@ impl EventReaderSerConfig {
 
 pub struct EventReader<'a> {
     event: &'a MessageEvent,
-    ser_config: EventReaderSerConfig,
+    reader: std::pin::Pin<&'a mut MessageReader>,
+    ser_config: &'a EventReaderSerConfig,
 }
 
 impl<'a> EventReader<'a> {
-    pub fn new(event: &'a MessageEvent, ser_config: EventReaderSerConfig) -> Self {
-        EventReader { event, ser_config }
+    pub fn new(event: &'a MessageEvent, ser_config: &'a EventReaderSerConfig) -> Self {
+        let reader = GetEventReader(event) as *mut MessageReader;
+        let reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+        EventReader { event, reader, ser_config}
     }
-    pub fn with_ser_config(mut self, ser_config: EventReaderSerConfig) -> Self {
+    pub fn with_ser_config(mut self, ser_config: &'a EventReaderSerConfig) -> Self {
         self.ser_config = ser_config;
         self
     }
 }
 
 impl EventReader<'_> {
-    pub fn to_map(&self) -> BTreeMap<String, CFValue> {
-        let reader = GetEventReader(self.event) as *mut MessageReader;
-        let mut reader = unsafe { std::pin::Pin::new_unchecked(&mut *reader) };
+    pub fn to_map(&mut self) -> BTreeMap<String, CFValue> {
         let mut map = BTreeMap::new();
         if self.ser_config.with_event_type {
             let event_type = self.event.getType() as MessageEvent_Types;
@@ -70,19 +71,19 @@ impl EventReader<'_> {
         }
         let symbol = self.event.getSymbol();
         map.insert("(2)Symbol".to_owned(), CFValue::String(symbol.to_string()));
-        while reader.as_mut().next() != autocxx::c_int(-1) {
+        while self.reader.as_mut().next() != autocxx::c_int(-1) {
             let key = format!(
                 "({}){}",
-                i32::from(reader.as_mut().getTokenNumber()),
-                reader.as_mut().getTokenName()
+                i32::from(self.reader.as_mut().getTokenNumber()),
+                self.reader.as_mut().getTokenName()
             );
-            let value = match reader.as_mut().getValueType() {
-                ValueTypes::INT64 => CFValue::Int(reader.as_mut().getValueAsInteger()),
-                ValueTypes::DOUBLE => CFValue::Double(reader.as_mut().getValueAsDouble()),
+            let value = match self.reader.as_mut().getValueType() {
+                ValueTypes::INT64 => CFValue::Int(self.reader.as_mut().getValueAsInteger()),
+                ValueTypes::DOUBLE => CFValue::Double(self.reader.as_mut().getValueAsDouble()),
                 ValueTypes::STRING => {
-                    CFValue::String(reader.as_mut().getValueAsString().to_string())
+                    CFValue::String(self.reader.as_mut().getValueAsString().to_string())
                 }
-                ValueTypes::DATETIME => CFValue::Datetime(reader.as_mut().getValueAsDouble()),
+                ValueTypes::DATETIME => CFValue::Datetime(self.reader.as_mut().getValueAsDouble()),
                 ValueTypes::UNKNOWN => CFValue::Unknown,
             };
             map.insert(key, value);
@@ -90,11 +91,11 @@ impl EventReader<'_> {
         map
     }
 
-    pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&self.to_map())
+    pub fn to_json(&mut self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&mut self.to_map())
     }
 
-    pub fn to_msgpack(&self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
+    pub fn to_msgpack(&mut self) -> Result<Vec<u8>, rmp_serde::encode::Error> {
         rmp_serde::to_vec_named(&self.to_map())
     }
 }

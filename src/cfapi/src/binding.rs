@@ -1,7 +1,7 @@
-use super::user_event::{DefaultUserEventHandler, UserEventHandlerExt};
-use super::session_event::{DefaultSessionEventHandler, SessionEventHandlerExt};
 use super::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
-use super::stat_event::{StatisticsEventHandlerExt, DefaultStatisticsEventHandler};
+use super::session_event::{DefaultSessionEventHandler, SessionEventHandlerExt};
+use super::stat_event::{DefaultStatisticsEventHandler, StatisticsEventHandlerExt};
+use super::user_event::{DefaultUserEventHandler, UserEventHandlerExt};
 
 use autocxx::prelude::*;
 use autocxx::subclass::*;
@@ -154,7 +154,7 @@ impl BaseMessageEventHandler {
         let mut me = Self::default();
         let handlers = if handlers.is_empty() {
             me.with_default = true;
-            vec![Box::new(DefaultMessageEventHandler) as Box<dyn MessageEventHandlerExt>]
+            vec![Box::new(DefaultMessageEventHandler::default()) as Box<dyn MessageEventHandlerExt>]
         } else {
             me.with_default = false;
             handlers
@@ -191,7 +191,6 @@ impl cfapi::MessageEventHandler_methods for BaseMessageEventHandler {
         }
     }
 }
-
 
 #[subclass]
 #[derive(Default)]

@@ -26,4 +26,7 @@ serde = { version = "1.0.197", features = ["serde_derive"] }
 serde_json = "1.0.115"
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
+snafu = "0.8.2"
+serde_yaml = "0.9.34"
+toml = "0.8.12"
 

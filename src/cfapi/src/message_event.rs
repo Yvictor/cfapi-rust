@@ -28,17 +28,15 @@ pub struct DataSrc533 {
     volume: i64,
 }
 
-pub struct DefaultMessageEventHandler;
+pub struct DefaultMessageEventHandler {
+    reader_config: EventReaderSerConfig,
+}
 
 impl MessageEventHandlerExt for DefaultMessageEventHandler {
     fn on_message_event(&mut self, event: &MessageEvent) {
-        let event_reader = EventReader::new(
-            &event,
-            EventReaderSerConfig::default()
-                .with_event_type(true)
-                .with_src(true),
-        );
-        info!("DATA: {}", event_reader.to_json().unwrap());
+        let mut event_reader = EventReader::new(&event, &self.reader_config);
+        info!("DATA: { }", event_reader.to_json().unwrap());
+        // info!("DATA");
         // let mut file = OpenOptions::new()
         //     .write(true)
         //     .create(true)
@@ -338,6 +336,15 @@ impl MessageEventHandlerExt for DefaultMessageEventHandler {
 
 impl Default for Box<dyn MessageEventHandlerExt> {
     fn default() -> Self {
-        Box::new(DefaultMessageEventHandler)
+        Box::new(DefaultMessageEventHandler::default())
+    }
+}
+
+impl Default for DefaultMessageEventHandler {
+    fn default() -> Self {
+        let reader_config = EventReaderSerConfig::default()
+            .with_event_type(true)
+            .with_src(true);
+        DefaultMessageEventHandler { reader_config }
     }
 }
