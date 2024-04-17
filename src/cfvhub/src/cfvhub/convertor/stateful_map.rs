@@ -8,6 +8,7 @@ use dashmap::DashMap;
 use std::collections::BTreeMap;
 use tracing::debug;
 use super::Convertor;
+use itertools::Itertools;
 
 
 
@@ -44,12 +45,14 @@ impl Convertor for StatefulBTreeMapConvertor {
         let key = format!("{}.{}", src, symbol);
         // maybe consider event type for update or create
         let event_type = event.getType();
-        debug!("key: {}, {}", key, event_type);
+        // debug!("key: {}, {}", key, event_type);
         // let status_code = i32::from(event.getStatusCode());
         // let tag = event.getTag();
         // debug!("event type: {:?}, status code: {}, tag: {}", event_type, (status_code), tag);
         let mut reader = EventReader::new(event, &self.reader_config);
         let map = reader.to_map();
+        let updated_keys = map.keys().join(",");
+        debug!("key: {}, {}, keys: {}", key, event_type, updated_keys);
         let updated_map = match self.state.get_mut(&key) {
             Some(mut state) => {
                 state.extend(map);
