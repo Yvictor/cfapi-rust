@@ -39,6 +39,10 @@ where
     R: SinkExt<C::Out>,
 {
     fn on_message_event(&mut self, event: &MessageEvent) {
-        self.sink.exec(&self.convertor.convert(event), &self.formater);
+        if event.getSource() == autocxx::c_int(0) {
+            return;
+        }
+        self.sink
+            .exec(&self.convertor.convert(event), &self.formater);
     }
 }

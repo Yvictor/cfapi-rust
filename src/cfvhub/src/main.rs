@@ -1,6 +1,6 @@
 use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
-use cfvhub::convertor::BTreeMapConvertor;
+use cfvhub::convertor::{BTreeMapConvertor, StatefulBTreeMapConvertor};
 use cfvhub::formater::JsonFormater;
 use cfvhub::pipe::PipeMessageHandler;
 use cfvhub::sink::DiskSink;
@@ -50,7 +50,8 @@ fn main() {
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let pipe_message_handler = PipeMessageHandler::new(
-        BTreeMapConvertor::default(),
+        // BTreeMapConvertor::default(),
+        StatefulBTreeMapConvertor::default(),
         JsonFormater {},
         DiskSink::new("record.json".into()).unwrap(),
     );

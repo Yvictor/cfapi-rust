@@ -1,3 +1,5 @@
+use std::fmt::{Debug, Display};
+
 use super::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
 use super::session_event::{DefaultSessionEventHandler, SessionEventHandlerExt};
 use super::stat_event::{DefaultStatisticsEventHandler, StatisticsEventHandlerExt};
@@ -238,6 +240,30 @@ impl cfapi::StatisticsEventHandler_methods for BaseStatisticsEventHandler {
     fn onStatisticsEvent(&mut self, event: &cfapi::StatisticsEvent) {
         for handler in &mut self.handlers {
             handler.on_statistics_event(event);
+        }
+    }
+}
+
+impl Debug for MessageEvent_Types {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageEvent_Types::IMAGE_PART => write!(f, "IMAGE_PART"),
+            MessageEvent_Types::IMAGE_COMPLETE => write!(f, "IMAGE_COMPLETE"),
+            MessageEvent_Types::REFRESH => write!(f, "REFRESH"),
+            MessageEvent_Types::STATUS => write!(f, "STATUS"),
+            MessageEvent_Types::UPDATE => write!(f, "UPDATE"),
+        }
+    }
+}
+
+impl Display for MessageEvent_Types {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MessageEvent_Types::IMAGE_PART => write!(f, "IMAGE_PART"),
+            MessageEvent_Types::IMAGE_COMPLETE => write!(f, "IMAGE_COMPLETE"),
+            MessageEvent_Types::REFRESH => write!(f, "REFRESH"),
+            MessageEvent_Types::STATUS => write!(f, "STATUS"),
+            MessageEvent_Types::UPDATE => write!(f, "UPDATE"),
         }
     }
 }
