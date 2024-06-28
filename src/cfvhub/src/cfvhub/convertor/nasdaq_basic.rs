@@ -8,6 +8,38 @@ use super::Convertor;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
+use std::convert::Into;
+
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MarketPhase {
+    Closed = 1,
+    PreMarket = 2,
+    Trading = 4,
+    PostMarket = 10,
+}
+
+impl Default for MarketPhase {
+    fn default() -> Self {
+        MarketPhase::Closed
+    }   
+}
+
+impl Into<MarketPhase> for i64 {
+    fn into(self) -> MarketPhase {
+        match self {
+            1 => MarketPhase::Closed,
+            2 => MarketPhase::PreMarket,
+            4 => MarketPhase::Trading,
+            10 => MarketPhase::PostMarket,
+            _ => MarketPhase::Closed,
+        }
+    }
+    
+}
+
+
 
 // snapshot
 // '(207)ASK.CLOSE': 167.76,
@@ -31,35 +63,49 @@ use tracing::{debug, info, warn};
 
 //update
 
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataNasdaqBasic {
-    exchange: String,
-    symbol: String,
-    ts: f64,
-    ask_price: f64,
-    ask_volume: i64,
-    bid_price: f64,
-    bid_volume: i64,
-    price: f64,
-    volume: i64,
-    total_volume: i64,
+    exchange: String, // 3240
+    // symbol: String, //
+    code: String,      // 3170
+    ts: f64,           // 16 utc time zone
+    exchange_ts: i64,  // 55 exchange time zone
+    ask_price: f64,    // 10
+    ask_volume: i64,   // 11
+    bid_price: f64,    // 12
+    bid_volume: i64,   // 13
+    price: f64,        // 447
+    volume: i64,       // 448
+    total_volume: i64, // 22 or use 463 for official vol
+    total_amount: i64, // 460
+    // open: f64,
+    // high: f64,
+    // low: f64,
+    market_phase: MarketPhase, // 1709 
+    price_chg: f64, // 361
+    pct_chg: f64,   // 362
+                    // bid_side_total_vol: i64,
+                    // ask_side_total_vol: i64,
+                    // bid_side_total_cnt: i64,
+                    // ask_side_total_cnt: i64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataNasdaqBasicBidAsk {
     exchange: String,
-    symbol: String,
+    code: String,
     ts: f64,
-    ask_price: f64,
-    ask_volume: i64,
-    bid_price: f64,
-    bid_volume: i64,
+    ask_price: f64,  // f64[]
+    ask_volume: i64, // i64[]
+    bid_price: f64,  // f64[]
+    bid_volume: i64, // i64
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataNasdaqBasicTrade {
     exchange: String,
-    symbol: String,
+    code: String,
     ts: f64,
     open: f64,
     high: f64,
@@ -174,7 +220,7 @@ fn update_double(value: CFValue, v: &mut f64, field_name: &str) {
 }
 
 impl Convertor for NasdaqBasicConvertor {
-    type Out = DataNasdaqBasic;
+    type Out = Option<DataNasdaqBasic>;
 
     fn convert(&self, event: &MessageEvent) -> Self::Out {
         let src = i32::from(event.getSource());
@@ -191,35 +237,52 @@ impl Convertor for NasdaqBasicConvertor {
         let updated_map = match self.state.get_mut(&key) {
             Some(mut state) => {
                 for (token, value) in reader.iter_with_token_number() {
+                    // TODO only update the field that has value
                     match token {
-                        207 => update_double(value, &mut state.ask_price, "ask_price"),
-                        218 => update_double(value, &mut state.bid_price, "bid_price"),
-                        791 => update_int(value, &mut state.ask_volume, "ask_volume"),
-                        790 => update_int(value, &mut state.bid_volume, "bid_volume"),
-                        22 => update_int(value, &mut state.volume, "volume"),
-                        23 => update_int(value, &mut state.total_volume, "total_volume"),
+                        10 => state.ask_price = value.to_f64(),
+                        11 => state.ask_volume = value.to_i64(),
+                        12 => state.bid_price = value.to_f64(),
+                        13 => state.bid_volume = value.to_i64(),
+                        16 => state.ts = value.to_f64(),
+                        55 => state.exchange_ts = value.to_i64(),
+                        361 => state.price_chg = value.to_f64(),
+                        362 => state.pct_chg = value.to_f64(),
+                        447 => state.price = value.to_f64(),
+                        448 => state.total_volume = value.to_i64(),
+                        1709 => state.market_phase = value.to_i64().into(),
+                        // 23 => update_int(value, &mut state.total_volume, "total_volume"),
                         _ => {
                             debug!("token: {}, value: {:?}", token, value);
                         }
                     }
                 }
-
-                state.clone()
+                Some(state.clone())
             }
             None => {
+                let mut r = EventReader::new(event, &self.reader_config);
+                let m = r.to_map();
+                println!("event map: {:?}", m);
                 let data = DataNasdaqBasic {
-                    exchange: "".into(), //reader.find(3945).unwrap_or("".to_string()),
-                    symbol: symbol.to_string(),
-                    ts: 0.0,
-                    ask_price: 0.0,
-                    ask_volume: 0,
-                    bid_price: 0.0,
-                    bid_volume: 0,
-                    price: 0.0,
-                    volume: 0,
-                    total_volume: 0,
+                    code: symbol.to_string(),
+                    ask_price: reader.find(10).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    ask_volume: reader.find(11).unwrap_or(CFValue::Double(0.0)).to_i64(),
+                    bid_price: reader.find(12).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    bid_volume: reader.find(13).unwrap_or(CFValue::Double(0.0)).to_i64(),
+                    ts: reader.find(16).unwrap_or(CFValue::Datetime(0.0)).to_f64(),
+                    // total_volume: reader.find(22).unwrap_or(CFValue::Int(0)).to_i64(),
+                    exchange_ts: reader.find(55).unwrap_or(CFValue::Int(0)).to_i64(),
+                    price_chg: reader.find(361).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    pct_chg: reader.find(362).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    price: reader.find(447).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    volume: reader.find(448).unwrap_or(CFValue::Int(0)).to_i64(),
+                    total_amount: reader.find(460).unwrap_or(CFValue::Int(0)).to_i64(),
+                    total_volume: reader.find(463).unwrap_or(CFValue::Int(0)).to_i64(),
+                    market_phase: reader.find(1709).unwrap_or(CFValue::Int(1)).to_i64().into(),
+                    exchange: reader.find(3240).unwrap_or(CFValue::String("".into())).to_string(),
                 };
-                data
+                println!("new data: {:?}", data);
+                self.state.insert(key.clone(), data);
+                None
             }
         };
         updated_map
@@ -231,6 +294,41 @@ mod tests {
     use super::*;
     use cfapi::value::CFValue;
     use std::collections::BTreeMap;
+
+    #[test]
+    fn test_dashmap_nasdaq_basic() {
+        let state = DashMap::with_hasher(RandomState::new());
+        let data = DataNasdaqBasic {
+            exchange: "TSE".into(),
+            code: "2330".into(),
+            ts: 1625203015.544646,
+            exchange_ts: 1625203015,
+            ask_price: 594.0,
+            ask_volume: 1457,
+            bid_price: 593.0,
+            bid_volume: 248,
+            price: 590.0,
+            volume: 468,
+            total_volume: 347307,
+            total_amount: 204995925,
+            price_chg: -3.0,
+            pct_chg: -0.505902,
+            market_phase: MarketPhase::Closed,
+        };
+        state.insert("TSE.2330", data.clone());
+        let origin = state.get("TSE.2330").unwrap();
+        assert_eq!(origin.ask_price, 594.0);
+        let _new_v = match state.get_mut("TSE.2330") {
+            Some(mut v) => {
+                v.ask_price = 595.0;
+            }
+            None => {
+                assert!(false);
+            }
+        };
+        let new_v = state.get("TSE.2330").unwrap();
+        assert_eq!(new_v.ask_price, 595.0);
+    }
 
     #[test]
     fn test_dashmap_usage() {

@@ -10,6 +10,7 @@ pub trait Convertor {
 
 pub mod stateless_map;
 pub mod stateful_map;
+pub mod nasdaq_basic;
 
 // pub trait Convertor<Out> {
 //     fn convert(&self, event: &MessageEvent) -> Out;

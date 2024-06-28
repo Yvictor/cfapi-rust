@@ -2,9 +2,10 @@ use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
 // use cfvhub::convertor::{BTreeMapConvertor, StatefulBTreeMapConvertor};
 use cfvhub::convertor::stateful_map::StatefulBTreeMapConvertor;
-use cfvhub::formater::JsonFormater;
+use cfvhub::convertor::nasdaq_basic::NasdaqBasicConvertor;
+use cfvhub::formater::{JsonFormater, MessagePackFormater};
 use cfvhub::pipe::PipeMessageHandler;
-use cfvhub::sink::DiskSink;
+use cfvhub::sink::{DiskSink, DoNothingSink, ConsoleSink};
 use tracing::Level;
 use tracing_subscriber;
 
@@ -45,16 +46,20 @@ fn main() {
                 | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
         )
         // .with_target(false)
-        .with_max_level(Level::DEBUG)
+        .with_max_level(Level::INFO)
         .finish();
     // .init();
     tracing::subscriber::set_global_default(subscriber).unwrap();
 
     let pipe_message_handler = PipeMessageHandler::new(
         // BTreeMapConvertor::default(),
-        StatefulBTreeMapConvertor::default(),
+        // StatefulBTreeMapConvertor::default(),
+        NasdaqBasicConvertor::default(),
         JsonFormater {},
-        DiskSink::new("record.json".into()).unwrap(),
+        // MessagePackFormater {},
+        // DiskSink::new("record.json".into()).unwrap(),
+        DoNothingSink {},
+        // ConsoleSink {},
     );
 
     let config = CFAPIConfig::default()
@@ -62,9 +67,9 @@ fn main() {
         .with_app_version("1.0")
         .with_username("SINOPACNB")
         .with_password("s1nopac")
-        .with_statistics_interval(5 * 60);
+        .with_statistics_interval(5);
     let session_config = SessionConfig::default()
-        .with_multi_threaded_api_connections(true)
+        .with_multi_threaded_api_connections(false)
         .with_max_user_threads(12);
     let main_connection_config = ConnectionConfig::default();
     // let backup_connection_config = ConnectionConfig::default().with_backup(true);
@@ -80,9 +85,19 @@ fn main() {
     // api.set_connection_config("216.221.213.14:7022", &backup_connection_config);
     api.start();
     api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
+    // for a in 'A'..='B' {
+    //     api.request("533", &format!("{{^{}}}", a), Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // }
+    // for a in 'A'..='Z' {
+    //     api.request("534", &format!("{{^{}}}", a), Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // }
+    // api.request("533", "{^A}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // api.request("533", "{^B}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // api.request("533", "{^C}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // api.request("533", "*", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
     // api.request("533", "NVDA", Commands::QUERYSNAPANDSUBSCRIBE);
     // api.request("533", "TLSA", Commands::QUERYSNAPANDSUBSCRIBE);
-    api.request("534", "{^V}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
+    // api.request("534", "{^V}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
     //     std::thread::spawn(move || {
     //         let solclient = SolClient::new(SolClientLogLevel::Notice);
     //         match solclient {

@@ -21,6 +21,40 @@ where
     // fn format(&self, input: &Self::In) -> Self::F;
 }
 
+pub struct DoNothingSink {
+    // do nothing
+}
+
+impl<In: Serialize> SinkExt<In> for DoNothingSink {
+    fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
+        let _formated = formater.format(input);
+    }
+}
+
+pub struct ConsoleSink {
+}
+
+impl<In: Serialize> SinkExt<In> for ConsoleSink {
+    fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
+        let formated = formater.format(input);
+
+        match formated {
+            Ok(formated) => match formated {
+                Formated::String(s) => {
+                    println!("{}", s);
+                }
+                Formated::Bytes(b) => {
+                    println!("{:?}", b);
+                }
+            },
+            Err(e) => {
+                eprintln!("Error: {}", e);
+            }
+        }
+    }
+    
+}
+
 pub struct DiskSink {
     pub path: std::path::PathBuf,
     file: std::fs::File,

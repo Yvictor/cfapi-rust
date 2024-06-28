@@ -107,7 +107,7 @@ impl<'a> EventReader<'a> {
         self.reader.as_mut().getTokenName().to_string()
     }
 
-    pub fn find(&'a mut self, id: i32) -> Option<CFValue> {
+    pub fn find(&mut self, id: i32) -> Option<CFValue> {
         if self.reader.as_mut().find(autocxx::c_int(id)) {
             Some(self.get_value())
         } else {
