@@ -6,7 +6,7 @@ use cfapi::value::CFValue;
 use dashmap::DashMap;
 
 use std::collections::BTreeMap;
-use tracing::debug;
+use tracing::{debug, info};
 use super::Convertor;
 use itertools::Itertools;
 
@@ -39,7 +39,7 @@ impl Default for StatefulBTreeMapConvertor {
 impl Convertor for StatefulBTreeMapConvertor {
     type Out = BTreeMap<String, CFValue>;
 
-    fn convert(&self, event: &MessageEvent) -> Self::Out {
+    fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
         let symbol = event.getSymbol();
         let key = format!("{}.{}", src, symbol);
@@ -63,7 +63,7 @@ impl Convertor for StatefulBTreeMapConvertor {
                 map
             }
         };
-        updated_map
+        Some(updated_map)
     }
 }
 

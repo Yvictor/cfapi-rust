@@ -5,7 +5,7 @@ use serde::Serialize;
 pub trait Convertor {
     type Out: Serialize;
 
-    fn convert(&self, event: &MessageEvent) -> Self::Out;
+    fn convert(&self, event: &MessageEvent) -> Option<Self::Out>;
 }
 
 pub mod stateless_map;

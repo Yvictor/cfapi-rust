@@ -28,8 +28,8 @@ impl BTreeMapConvertor {
 impl Convertor for BTreeMapConvertor {
     type Out = BTreeMap<String, CFValue>;
 
-    fn convert(&self, event: &MessageEvent) -> Self::Out {
+    fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let mut reader = EventReader::new(event, &self.reader_config);
-        reader.to_map()
+        Some(reader.to_map())
     }
 }

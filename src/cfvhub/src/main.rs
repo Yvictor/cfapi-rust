@@ -5,7 +5,9 @@ use cfvhub::convertor::stateful_map::StatefulBTreeMapConvertor;
 use cfvhub::convertor::nasdaq_basic::NasdaqBasicConvertor;
 use cfvhub::formater::{JsonFormater, MessagePackFormater};
 use cfvhub::pipe::PipeMessageHandler;
-use cfvhub::sink::{DiskSink, DoNothingSink, ConsoleSink};
+use cfvhub::pipe_queue::PipeQueueMessageHandler;
+use cfvhub::sink::{DiskSink, DoNothingSink, ConsoleSink, SolaceSink};
+use crossbeam_queue::ArrayQueue;
 use tracing::Level;
 use tracing_subscriber;
 
@@ -39,8 +41,9 @@ use tracing_subscriber;
 fn main() {
     let subscriber = tracing_subscriber::fmt()
         .compact()
-        .with_line_number(true)
-        .with_thread_ids(true)
+        // .with_line_number(true)
+        // .with_thread_ids(true)
+        .with_file(false)
         .with_span_events(
             tracing_subscriber::fmt::format::FmtSpan::ENTER
                 | tracing_subscriber::fmt::format::FmtSpan::CLOSE,
@@ -58,16 +61,32 @@ fn main() {
         JsonFormater {},
         // MessagePackFormater {},
         // DiskSink::new("record.json".into()).unwrap(),
-        DoNothingSink {},
-        // ConsoleSink {},
+        // DoNothingSink {},
+        ConsoleSink {},
     );
+    // let queue = ArrayQueue::new(1024);
+    let pipe_queue_message_handler: PipeQueueMessageHandler<NasdaqBasicConvertor, JsonFormater, SolaceSink> = PipeQueueMessageHandler::new(
+        NasdaqBasicConvertor::default(),
+        // JsonFormater {},
+        // MessagePackFormater {},
+        // DiskSink::new("record.json".into()).unwrap(),
+        // DoNothingSink {},
+        // ConsoleSink {},
+        1024,
+    );
+    pipe_queue_message_handler.exec_loop_th();
+    // queue.pop();
+    // println!("start exec_loop_th");
+    // pipe_queue_message_handler.exec_loop_th();
+    // println!("started exec_loop_th");
+    
 
     let config = CFAPIConfig::default()
         .with_app_name("sample")
         .with_app_version("1.0")
         .with_username("SINOPACNB")
         .with_password("s1nopac")
-        .with_statistics_interval(5);
+        .with_statistics_interval(60);
     let session_config = SessionConfig::default()
         .with_multi_threaded_api_connections(false)
         .with_max_user_threads(12);
@@ -77,14 +96,17 @@ fn main() {
         config,
         vec![],
         vec![],
-        vec![Box::new(pipe_message_handler)],
+        // vec![Box::new(pipe_message_handler)],
+        vec![Box::new(pipe_queue_message_handler)],
         vec![],
     );
     api.set_session_config(&session_config);
     api.set_connection_config("216.221.213.14:7022", &main_connection_config);
     // api.set_connection_config("216.221.213.14:7022", &backup_connection_config);
     api.start();
-    api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
+    // api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
+    api.request("533", "NVDA", Commands::QUERYSNAPANDSUBSCRIBE);
+    // pipe_queue_message_handler.exex_loop_th();
     // for a in 'A'..='B' {
     //     api.request("533", &format!("{{^{}}}", a), Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
     // }
@@ -144,6 +166,6 @@ fn main() {
     //             }
     //         }
     //     });
-
+    // pipe_queue_message_handler.exec_loop();
     std::thread::sleep(std::time::Duration::from_secs(30 * 60));
 }

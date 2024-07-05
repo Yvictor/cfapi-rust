@@ -3,6 +3,7 @@ use super::sink::SinkExt;
 use cfapi::binding::MessageEvent;
 
 use cfapi::message_event::MessageEventHandlerExt;
+use tracing::info;
 
 use super::convertor::Convertor;
 
@@ -39,10 +40,21 @@ where
     R: SinkExt<C::Out>,
 {
     fn on_message_event(&mut self, event: &MessageEvent) {
+        // let src = i32::from(event.getSource());
+        // let symbol = event.getSymbol();
+        // let key = format!("{}.{}", src, symbol);
+        // info!("key: {}", key);
         if event.getSource() == autocxx::c_int(0) {
             return;
         }
-        self.sink
-            .exec(&self.convertor.convert(event), &self.formater);
+        let data = self.convertor.convert(event);
+        match data {
+            Some(data) => {
+                self.sink.exec(&data, &self.formater);
+            }
+            None => {}
+            
+        }
+        // std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }

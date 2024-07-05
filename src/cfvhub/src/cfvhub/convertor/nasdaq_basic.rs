@@ -9,15 +9,16 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 use std::convert::Into;
+use serde_repr::{Serialize_repr, Deserialize_repr};
 
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
 pub enum MarketPhase {
-    Closed = 1,
-    PreMarket = 2,
-    Trading = 4,
-    PostMarket = 10,
+    PreMarket,
+    Trading,
+    PostMarket,
+    Closed,
 }
 
 impl Default for MarketPhase {
@@ -65,7 +66,7 @@ impl Into<MarketPhase> for i64 {
 
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct DataNasdaqBasic {
+pub struct DataNasdaqBasicState {
     exchange: String, // 3240
     // symbol: String, //
     code: String,      // 3170
@@ -75,13 +76,13 @@ pub struct DataNasdaqBasic {
     ask_volume: i64,   // 11
     bid_price: f64,    // 12
     bid_volume: i64,   // 13
-    price: f64,        // 447
+    close: f64,        // 447
     volume: i64,       // 448
     total_volume: i64, // 22 or use 463 for official vol
     total_amount: i64, // 460
-    // open: f64,
-    // high: f64,
-    // low: f64,
+    open: f64,
+    high: f64,
+    low: f64,
     market_phase: MarketPhase, // 1709 
     price_chg: f64, // 361
     pct_chg: f64,   // 362
@@ -92,7 +93,7 @@ pub struct DataNasdaqBasic {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct DataNasdaqBasicBidAsk {
+pub struct NBBidAsk {
     exchange: String,
     code: String,
     ts: f64,
@@ -100,10 +101,11 @@ pub struct DataNasdaqBasicBidAsk {
     ask_volume: i64, // i64[]
     bid_price: f64,  // f64[]
     bid_volume: i64, // i64
+    market_phase: MarketPhase,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
-pub struct DataNasdaqBasicTrade {
+pub struct NBTick {
     exchange: String,
     code: String,
     ts: f64,
@@ -115,6 +117,7 @@ pub struct DataNasdaqBasicTrade {
     total_amount: i64,
     volume: i64,
     total_volume: i64,
+    market_phase: MarketPhase,
     // tick_type:
     // chg_type:
     // price_change
@@ -128,6 +131,13 @@ pub struct DataNasdaqBasicTrade {
     // suspend = 0,
     // simtrade = 0,
     // intraday_odd = 0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum DataNasdaqBasic {
+    BidAsk(NBBidAsk),
+    Tick(NBTick),
 }
 
 // Exchange.TSE
@@ -175,7 +185,7 @@ pub struct DataNasdaqBasicTrade {
 
 pub struct NasdaqBasicConvertor {
     reader_config: EventReaderSerConfig,
-    state: DashMap<String, DataNasdaqBasic, RandomState>,
+    state: DashMap<String, DataNasdaqBasicState, RandomState>,
 }
 
 impl NasdaqBasicConvertor {
@@ -197,32 +207,11 @@ impl Default for NasdaqBasicConvertor {
     }
 }
 
-fn update_int(value: CFValue, v: &mut i64, field_name: &str) {
-    match value {
-        CFValue::Int(vv) => {
-            *v = vv;
-        }
-        _ => {
-            warn!("{} not int: {:?} ignore update", field_name, value);
-        }
-    }
-}
-
-fn update_double(value: CFValue, v: &mut f64, field_name: &str) {
-    match value {
-        CFValue::Double(vv) => {
-            *v = vv;
-        }
-        _ => {
-            warn!("{} not double: {:?} ignore update", field_name, value);
-        }
-    }
-}
 
 impl Convertor for NasdaqBasicConvertor {
-    type Out = Option<DataNasdaqBasic>;
+    type Out = DataNasdaqBasic;
 
-    fn convert(&self, event: &MessageEvent) -> Self::Out {
+    fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
         let symbol = event.getSymbol();
         let key = format!("{}.{}", src, symbol);
@@ -234,21 +223,35 @@ impl Convertor for NasdaqBasicConvertor {
         // debug!("event type: {:?}, status code: {}, tag: {}", event_type, (status_code), tag);
         let mut reader = EventReader::new(event, &self.reader_config);
 
-        let updated_map = match self.state.get_mut(&key) {
+        let data = match self.state.get_mut(&key) {
             Some(mut state) => {
+                let mut is_tick = false;
+                let mut is_bidask = false;
                 for (token, value) in reader.iter_with_token_number() {
                     // TODO only update the field that has value
                     match token {
-                        10 => state.ask_price = value.to_f64(),
+                        10 => {
+                            is_bidask = true;
+                            state.ask_price = value.to_f64()
+                        },
                         11 => state.ask_volume = value.to_i64(),
-                        12 => state.bid_price = value.to_f64(),
+                        12 => {
+                            is_bidask = true;
+                            state.bid_price = value.to_f64()
+                        },
                         13 => state.bid_volume = value.to_i64(),
                         16 => state.ts = value.to_f64(),
                         55 => state.exchange_ts = value.to_i64(),
                         361 => state.price_chg = value.to_f64(),
                         362 => state.pct_chg = value.to_f64(),
-                        447 => state.price = value.to_f64(),
-                        448 => state.total_volume = value.to_i64(),
+                        447 => {
+                            is_tick = true;
+                            state.close = value.to_f64()
+                        },
+                        448 => state.volume = value.to_i64(),
+                        // 460 => state.total_amount = value.to_i64(),
+                        // 22 => state.amount = value.to_i64(),
+                        463 => state.total_volume = value.to_i64(),
                         1709 => state.market_phase = value.to_i64().into(),
                         // 23 => update_int(value, &mut state.total_volume, "total_volume"),
                         _ => {
@@ -256,13 +259,45 @@ impl Convertor for NasdaqBasicConvertor {
                         }
                     }
                 }
-                Some(state.clone())
+                // println!("updated state: {:?}", state.clone());
+                let data = if is_tick {
+                    Some(DataNasdaqBasic::Tick(NBTick {
+                        exchange: state.exchange.clone(),
+                        code: state.code.clone(),
+                        ts: state.ts,
+                        open: state.open,
+                        high: state.high,
+                        low: state.low,
+                        close: state.close,
+                        amount: 0,
+                        total_amount: state.total_amount,
+                        volume: state.volume,
+                        total_volume: state.total_volume,
+                        market_phase: state.market_phase.clone(),
+                    }))
+                } else if is_bidask {
+                    Some(DataNasdaqBasic::BidAsk(NBBidAsk {
+                        exchange: state.exchange.clone(),
+                        code: state.code.clone(),
+                        ts: state.ts,
+                        ask_price: state.ask_price,
+                        ask_volume: state.ask_volume,
+                        bid_price: state.bid_price,
+                        bid_volume: state.bid_volume,
+                        market_phase: state.market_phase.clone(),
+                    }))
+                } else {
+                    None
+                };
+                // println!("new data: {:?}", data);
+                data
+                // Some(data)
             }
             None => {
                 let mut r = EventReader::new(event, &self.reader_config);
                 let m = r.to_map();
                 println!("event map: {:?}", m);
-                let data = DataNasdaqBasic {
+                let data = DataNasdaqBasicState {
                     code: symbol.to_string(),
                     ask_price: reader.find(10).unwrap_or(CFValue::Double(0.0)).to_f64(),
                     ask_volume: reader.find(11).unwrap_or(CFValue::Double(0.0)).to_i64(),
@@ -273,7 +308,10 @@ impl Convertor for NasdaqBasicConvertor {
                     exchange_ts: reader.find(55).unwrap_or(CFValue::Int(0)).to_i64(),
                     price_chg: reader.find(361).unwrap_or(CFValue::Double(0.0)).to_f64(),
                     pct_chg: reader.find(362).unwrap_or(CFValue::Double(0.0)).to_f64(),
-                    price: reader.find(447).unwrap_or(CFValue::Double(0.0)).to_f64(),
+                    high: reader.find(389).unwrap_or(CFValue::Double(0.0)).to_f64(), // 389 is official high 388 is ice not exise in pre market
+                    low: reader.find(395).unwrap_or(CFValue::Double(0.0)).to_f64(), // 395 is official low 394 is ice not exise in pre market
+                    open: reader.find(401).unwrap_or(CFValue::Double(0.0)).to_f64(),// 401 is official open not exise in pre market
+                    close: reader.find(447).unwrap_or(CFValue::Double(0.0)).to_f64(),
                     volume: reader.find(448).unwrap_or(CFValue::Int(0)).to_i64(),
                     total_amount: reader.find(460).unwrap_or(CFValue::Int(0)).to_i64(),
                     total_volume: reader.find(463).unwrap_or(CFValue::Int(0)).to_i64(),
@@ -285,7 +323,8 @@ impl Convertor for NasdaqBasicConvertor {
                 None
             }
         };
-        updated_map
+        // None
+        data
     }
 }
 
@@ -298,7 +337,7 @@ mod tests {
     #[test]
     fn test_dashmap_nasdaq_basic() {
         let state = DashMap::with_hasher(RandomState::new());
-        let data = DataNasdaqBasic {
+        let data = DataNasdaqBasicState {
             exchange: "TSE".into(),
             code: "2330".into(),
             ts: 1625203015.544646,
@@ -307,7 +346,10 @@ mod tests {
             ask_volume: 1457,
             bid_price: 593.0,
             bid_volume: 248,
-            price: 590.0,
+            open: 591.0,
+            high: 591.0,
+            low: 589.0,
+            close: 590.0,
             volume: 468,
             total_volume: 347307,
             total_amount: 204995925,

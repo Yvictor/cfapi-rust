@@ -25,6 +25,7 @@ pub enum Formated {
     Bytes(Vec<u8>),
 }
 
+#[derive(Debug, Default)]
 pub struct JsonFormater;
 
 impl<I> FormaterExt<I> for JsonFormater
@@ -37,6 +38,7 @@ where
 }
 
 
+#[derive(Debug, Default)]
 pub struct YamlFormater;
 
 impl<I> FormaterExt<I> for YamlFormater
@@ -48,6 +50,7 @@ where
     }
 }
 
+#[derive(Debug, Default)]
 pub struct TomlFormater;
 
 impl<I> FormaterExt<I> for TomlFormater
@@ -59,6 +62,7 @@ where
     }
 }
 
+#[derive(Debug, Default)]
 pub struct MessagePackFormater;
 
 impl<I> FormaterExt<I> for MessagePackFormater
