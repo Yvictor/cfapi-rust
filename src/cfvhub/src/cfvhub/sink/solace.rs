@@ -1,10 +1,10 @@
 use rsolace::solclient::{SessionProps, SolClient};
 use rsolace::solmsg::SolMsg;
-use rsolace::types::SolClientLogLevel;
+use rsolace::types::{SolClientLogLevel, SolClientReturnCode};
 use serde::Serialize;
 use tracing::{error, info};
 
-use super::{Formated, FormaterExt, SinkError, SinkExt};
+use super::{Formated, FormaterExt, SinkError, SinkExt, Dest};
 
 // #[derive(Debug)]
 pub struct SolaceSink {
@@ -78,38 +78,35 @@ impl SolaceSink {
     }
 }
 
-impl<In: Serialize> SinkExt<In> for SolaceSink {
+impl<In: Serialize + Dest> SinkExt<In> for SolaceSink {
     fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
+        let dest = input.get_dest();
+        let content_type = formater.content_type();
         let formated = formater.format(input);
         match formated {
-            Ok(formated) => match formated {
-                Formated::String(s) => {
-                    let mut msg = SolMsg::new().unwrap();
-                    msg.set_binary_attachment(s.as_bytes());
-                    msg.set_topic("sw/api/v1/tick");
-                    msg.set_user_prop("ct", "json", 20);
-                    let _r = self.solclient.send_msg(&msg);
-                    // let topic = dotenvy::var("SOLACE_TOPIC").unwrap_or_else(|_| "default".to_string());
-                    // let r = self.solclient.send_message(&topic, &s);
-                    // if r {
-                    //     info!("SolaceSink send message success");
-                    // } else {
-                    //     error!("SolaceSink send message error");
-                    // }
-                }
-                Formated::Bytes(b) => {
-                    let mut msg = SolMsg::new().unwrap();
-                    msg.set_binary_attachment(&b);
-                    msg.set_topic("sw/api/v1/tick");
-                    msg.set_user_prop("ct", "msgpack", 20);
-                    let _r = self.solclient.send_msg(&msg);
-                    // let topic = dotenvy::var("SOLACE_TOPIC").unwrap_or_else(|_| "default".to_string());
-                    // let r = self.solclient.send_message(&topic, &b);
-                    // if r {
-                    //     info!("SolaceSink send message success");
-                    // } else {
-                    //     error!("SolaceSink send message error");
-                    // }
+            Ok(formated) => {
+                let mut msg = SolMsg::new().unwrap();
+                msg.set_topic(dest);
+                msg.set_user_prop("ct", content_type, 20);
+                let r = match formated {
+                    Formated::String(s) => {
+                        println!("{}", s);
+                        msg.set_binary_attachment(s.as_bytes());
+                        self.solclient.send_msg(&msg)
+                    }
+                    Formated::Bytes(b) => {
+                        msg.set_binary_attachment(&b);
+                        self.solclient.send_msg(&msg)
+                    }
+                };
+                match r {
+                    SolClientReturnCode::Ok => {
+                        // TODO to check queue
+                        // info!("SolaceSink send message success");
+                    }
+                    _ => {
+                        error!("SolaceSink send message error: {:?}", r);
+                    }
                 }
             },
             Err(e) => {

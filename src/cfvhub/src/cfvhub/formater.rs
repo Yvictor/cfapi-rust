@@ -18,6 +18,7 @@ where
     In: Serialize,
 {
     fn format(&self, input: &In) -> Result<Formated, FormatError>;
+    fn content_type(&self) -> &str;
 }
 
 pub enum Formated {
@@ -35,6 +36,9 @@ where
     fn format(&self,input: &I) -> Result<Formated, FormatError> {
         Ok(Formated::String(serde_json::to_string(input).context(JsonSnafu)?))
     }
+    fn content_type(&self) -> &str {
+        "json"
+    }
 }
 
 
@@ -48,6 +52,9 @@ where
     fn format(&self,input: &I) -> Result<Formated, FormatError> {
         Ok(Formated::String(serde_yaml::to_string(input).context(YamlSnafu)?))
     }
+    fn content_type(&self) -> &str {
+        "yaml"
+    }
 }
 
 #[derive(Debug, Default)]
@@ -60,6 +67,9 @@ where
     fn format(&self,input: &I) -> Result<Formated, FormatError> {
         Ok(Formated::String(toml::to_string(input).context(TomlSnafu)?))
     }
+    fn content_type(&self) -> &str {
+        "toml"
+    }
 }
 
 #[derive(Debug, Default)]
@@ -71,5 +81,8 @@ where
 {
     fn format(&self,input: &I) -> Result<Formated, FormatError> {
         Ok(Formated::Bytes(rmp_serde::to_vec(input).context(MessagePackSnafu)?))
+    }
+    fn content_type(&self) -> &str {
+        "msgp"
     }
 }

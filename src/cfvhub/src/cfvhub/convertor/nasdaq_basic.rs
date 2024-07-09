@@ -4,6 +4,7 @@ use cfapi::event_reader::{EventReader, EventReaderSerConfig};
 use cfapi::value::CFValue;
 use dashmap::DashMap;
 
+use crate::sink::Dest;
 use super::Convertor;
 use itertools::Itertools;
 use serde::{Deserialize, Serialize};
@@ -94,6 +95,8 @@ pub struct DataNasdaqBasicState {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct NBBidAsk {
+    #[serde(skip_serializing)]
+    _dest: String,
     exchange: String,
     code: String,
     ts: f64,
@@ -106,6 +109,8 @@ pub struct NBBidAsk {
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct NBTick {
+    #[serde(skip_serializing)]
+    _dest: String,
     exchange: String,
     code: String,
     ts: f64,
@@ -135,7 +140,7 @@ pub struct NBTick {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
-pub enum DataNasdaqBasic {
+pub enum DataNasdaqBasicV1 {
     BidAsk(NBBidAsk),
     Tick(NBTick),
 }
@@ -183,12 +188,12 @@ pub enum DataNasdaqBasic {
 //     intraday_odd = 0
 // )
 
-pub struct NasdaqBasicConvertor {
+pub struct NasdaqBasicConvertorV1 {
     reader_config: EventReaderSerConfig,
     state: DashMap<String, DataNasdaqBasicState, RandomState>,
 }
 
-impl NasdaqBasicConvertor {
+impl NasdaqBasicConvertorV1 {
     pub fn new(reader_config: EventReaderSerConfig) -> Self {
         Self {
             reader_config,
@@ -197,7 +202,7 @@ impl NasdaqBasicConvertor {
     }
 }
 
-impl Default for NasdaqBasicConvertor {
+impl Default for NasdaqBasicConvertorV1 {
     fn default() -> Self {
         Self::new(
             EventReaderSerConfig::default()
@@ -207,9 +212,18 @@ impl Default for NasdaqBasicConvertor {
     }
 }
 
+impl Dest for DataNasdaqBasicV1 {
+    fn get_dest(&self) -> &str {
+        match self {
+            DataNasdaqBasicV1::BidAsk(ba) => &ba._dest,
+            DataNasdaqBasicV1::Tick(tick) => &tick._dest,
+        }
+    }
+}
 
-impl Convertor for NasdaqBasicConvertor {
-    type Out = DataNasdaqBasic;
+
+impl Convertor for NasdaqBasicConvertorV1 {
+    type Out = DataNasdaqBasicV1;
 
     fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
@@ -261,7 +275,8 @@ impl Convertor for NasdaqBasicConvertor {
                 }
                 // println!("updated state: {:?}", state.clone());
                 let data = if is_tick {
-                    Some(DataNasdaqBasic::Tick(NBTick {
+                    Some(DataNasdaqBasicV1::Tick(NBTick {
+                        _dest: format!("api/v1/tick/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
                         code: state.code.clone(),
                         ts: state.ts,
@@ -276,7 +291,8 @@ impl Convertor for NasdaqBasicConvertor {
                         market_phase: state.market_phase.clone(),
                     }))
                 } else if is_bidask {
-                    Some(DataNasdaqBasic::BidAsk(NBBidAsk {
+                    Some(DataNasdaqBasicV1::BidAsk(NBBidAsk {
+                        _dest: format!("api/v1/bidask/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
                         code: state.code.clone(),
                         ts: state.ts,

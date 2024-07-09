@@ -109,7 +109,7 @@ where
                 match recv.recv() {
                     Ok(data) => {
                         // info!("data: {:?}", data);
-                        println!("data: {:?}", data);
+                        // println!("data: {:?}", data);
                         sink.exec(&data, &formater);
                     }
                     Err(_) => {

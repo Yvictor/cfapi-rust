@@ -22,6 +22,10 @@ where
     // fn format(&self, input: &Self::In) -> Self::F;
 }
 
+pub trait Dest {
+    fn get_dest(&self) -> &str;
+}
+
 pub mod abstain;
 pub mod console;
 pub mod disk;

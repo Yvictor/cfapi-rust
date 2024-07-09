@@ -2,7 +2,7 @@ use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
 // use cfvhub::convertor::{BTreeMapConvertor, StatefulBTreeMapConvertor};
 use cfvhub::convertor::stateful_map::StatefulBTreeMapConvertor;
-use cfvhub::convertor::nasdaq_basic::NasdaqBasicConvertor;
+use cfvhub::convertor::nasdaq_basic::NasdaqBasicConvertorV1;
 use cfvhub::formater::{JsonFormater, MessagePackFormater};
 use cfvhub::pipe::PipeMessageHandler;
 use cfvhub::pipe_queue::PipeQueueMessageHandler;
@@ -57,7 +57,7 @@ fn main() {
     let pipe_message_handler = PipeMessageHandler::new(
         // BTreeMapConvertor::default(),
         // StatefulBTreeMapConvertor::default(),
-        NasdaqBasicConvertor::default(),
+        NasdaqBasicConvertorV1::default(),
         JsonFormater {},
         // MessagePackFormater {},
         // DiskSink::new("record.json".into()).unwrap(),
@@ -65,8 +65,8 @@ fn main() {
         ConsoleSink {},
     );
     // let queue = ArrayQueue::new(1024);
-    let pipe_queue_message_handler: PipeQueueMessageHandler<NasdaqBasicConvertor, JsonFormater, SolaceSink> = PipeQueueMessageHandler::new(
-        NasdaqBasicConvertor::default(),
+    let pipe_queue_message_handler: PipeQueueMessageHandler<NasdaqBasicConvertorV1, JsonFormater, SolaceSink> = PipeQueueMessageHandler::new(
+        NasdaqBasicConvertorV1::default(),
         // JsonFormater {},
         // MessagePackFormater {},
         // DiskSink::new("record.json".into()).unwrap(),
