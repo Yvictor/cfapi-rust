@@ -9,7 +9,7 @@ use crossbeam_queue::ArrayQueue;
 use tracing::{error, info};
 // use crossbeam_utils::thread::scope;
 use super::convertor::Convertor;
-use crossbeam_channel::bounded;
+use crossbeam_channel::{bounded, unbounded, TrySendError};
 
 pub struct PipeQueueMessageHandler<C, F, R>
 where
@@ -24,6 +24,9 @@ where
     // queue: &'a ArrayQueue<C::Out>,
     recv: crossbeam_channel::Receiver<C::Out>,
     send: crossbeam_channel::Sender<C::Out>,
+    recv_back: crossbeam_channel::Receiver<C::Out>,
+    send_back: crossbeam_channel::Sender<C::Out>,
+    n: usize,
     _formater: PhantomData<F>,
     _sink: PhantomData<R>,
 }
@@ -49,18 +52,22 @@ where
     //     }
     // }
 
-    pub fn new(convertor: C, size: usize) -> Self 
-    where 
+    pub fn new(convertor: C, size: usize, n: usize) -> Self
+    where
         F: FormaterExt<C::Out> + Send + Sync + Default,
         R: SinkExt<C::Out> + Send + Sync + Default,
     {
-        let (s, r) = bounded(size);
+        let (send, recv) = bounded(size);
+        let (send_back, recv_back) = unbounded();
         Self {
             convertor,
             // formater,
             // sink,
-            recv: r,
-            send: s,
+            recv,
+            send,
+            recv_back,
+            send_back,
+            n,
             _formater: PhantomData,
             _sink: PhantomData,
         }
@@ -100,33 +107,48 @@ where
         F: FormaterExt<C::Out> + Send + Sync + Default,
         R: SinkExt<C::Out> + Send + Sync + Default,
     {
-        let recv = self.recv.clone();
-        std::thread::spawn(move || {
-            let formater = F::default();
-            let mut sink = R::default();
-            // let recv = recv.clone();
-            loop {
-                match recv.recv() {
-                    Ok(data) => {
-                        // info!("data: {:?}", data);
-                        // println!("data: {:?}", data);
-                        sink.exec(&data, &formater);
-                    }
-                    Err(_) => {
-                        error!("channel is empty");
+        for i in 0..self.n {
+            let recv = self.recv.clone();
+            let id = i.to_string();
+            std::thread::spawn(move || {
+                let formater = F::default();
+                let mut sink = R::build(&id);
+                // let recv = recv.clone();
+                loop {
+                    match recv.recv() {
+                        Ok(data) => {
+                            // info!("data: {:?}", data);
+                            // println!("data: {:?}", data);
+                            sink.exec(&data, &formater);
+                        }
+                        Err(_) => {
+                            error!("channel is empty");
+                        }
                     }
                 }
-            }
-            // self.exec_loop();
-        });
-        // scope(|scope| {
-        //     println!("start exec_loop_th");
-        //     scope.spawn(|_| {
-        //         self.exec_loop();
-        //     });
-        //     println!("started exec_loop_th");
-        // });
-        // .unwrap()
+            });
+        }
+        for i in 0..self.n {
+            let recv = self.recv_back.clone();
+            let id = format!("b{}", i);
+            std::thread::spawn(move || {
+                let formater = F::default();
+                let mut sink = R::build(&id);
+                // let recv = recv.clone();
+                loop {
+                    match recv.recv() {
+                        Ok(data) => {
+                            // info!("data: {:?}", data);
+                            // println!("data: {:?}", data);
+                            sink.exec(&data, &formater);
+                        }
+                        Err(_) => {
+                            error!("channel is empty");
+                        }
+                    }
+                }
+            });
+        }
     }
 
     pub fn get_queue_size(&self) -> usize {
@@ -148,12 +170,22 @@ where
         let data = self.convertor.convert(event);
         match data {
             Some(data) => {
-                match self.send.send(data) {
+                match self.send.try_send(data) {
                     Ok(_) => {
                         // info!("send");
                     }
-                    Err(_) => {
+                    Err(TrySendError::Full(data)) => {
+                        // send full notifiy
+                        match self.send_back.send(data) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                error!("backup channel error {:?}", e);
+                            }
+                        }
                         error!("channel is full");
+                    }
+                    Err(TrySendError::Disconnected(_)) => {
+                        error!("channel is disconnected");
                     }
                 }
             }

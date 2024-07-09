@@ -5,6 +5,10 @@ use serde::Serialize;
 pub struct ConsoleSink {}
 
 impl<In: Serialize> SinkExt<In> for ConsoleSink {
+    fn build(_id: &str) -> Self {
+        Self {}
+    }
+
     fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
         let formated = formater.format(input);
 

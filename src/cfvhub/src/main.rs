@@ -73,6 +73,7 @@ fn main() {
         // DoNothingSink {},
         // ConsoleSink {},
         1024,
+        2,
     );
     pipe_queue_message_handler.exec_loop_th();
     // queue.pop();

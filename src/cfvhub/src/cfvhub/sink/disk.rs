@@ -40,6 +40,11 @@ impl DiskSink {
 }
 
 impl<In: Serialize> SinkExt<In> for DiskSink {
+    fn build(id: &str) -> Self {
+        let path = dotenvy::var("DISK_SINK_PATH").unwrap_or_else(|_| "disk_sink.log".to_string());
+        Self::new(&path).unwrap()
+    }
+
     fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
         let formated = formater.format(input);
         match formated {

@@ -12,6 +12,11 @@ pub enum SinkError {
     DiskSinkPath { source: std::convert::Infallible },
 }
 
+// pub trait SinkConfig {
+//     fn config(&self);
+// }
+
+
 pub trait SinkExt<In>
 where
     In: Serialize,
@@ -20,6 +25,8 @@ where
     // type F;
     fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>);
     // fn format(&self, input: &Self::In) -> Self::F;
+    // fn build(config: &dyn SinkConfig) -> Self;
+    fn build(id: &str) -> Self;
 }
 
 pub trait Dest {

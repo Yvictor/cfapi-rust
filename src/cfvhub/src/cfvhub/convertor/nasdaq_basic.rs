@@ -276,7 +276,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                 // println!("updated state: {:?}", state.clone());
                 let data = if is_tick {
                     Some(DataNasdaqBasicV1::Tick(NBTick {
-                        _dest: format!("api/v1/tick/{}/{}", state.exchange, state.code),
+                        _dest: format!("api/V1/TIC/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
                         code: state.code.clone(),
                         ts: state.ts,
@@ -292,7 +292,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                     }))
                 } else if is_bidask {
                     Some(DataNasdaqBasicV1::BidAsk(NBBidAsk {
-                        _dest: format!("api/v1/bidask/{}/{}", state.exchange, state.code),
+                        _dest: format!("api/V1/QUO/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
                         code: state.code.clone(),
                         ts: state.ts,
