@@ -111,6 +111,7 @@ impl<In: Serialize + Dest> SinkExt<In> for SolaceSink {
                         self.solclient.send_msg(&msg)
                     }
                     Formated::Bytes(b) => {
+                        // println!("topic: {} data: {:?}", dest, b);
                         msg.set_binary_attachment(&b);
                         self.solclient.send_msg(&msg)
                     }

@@ -83,6 +83,6 @@ where
         Ok(Formated::Bytes(rmp_serde::to_vec(input).context(MessagePackSnafu)?))
     }
     fn content_type(&self) -> &str {
-        "msgp"
+        "msgpack"
     }
 }

@@ -227,6 +227,12 @@ impl Convertor for NasdaqBasicConvertorV1 {
 
     fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
+        if src != 533 {
+            let mut r = EventReader::new(event, &self.reader_config);
+            let m = r.to_map();
+            warn!("source not 533: {}, msg: {:?}", src, m);
+            return None;
+        }
         let symbol = event.getSymbol();
         let key = format!("{}.{}", src, symbol);
         // maybe consider event type for update or create
@@ -310,9 +316,9 @@ impl Convertor for NasdaqBasicConvertorV1 {
                 // Some(data)
             }
             None => {
-                let mut r = EventReader::new(event, &self.reader_config);
-                let m = r.to_map();
-                println!("event map: {:?}", m);
+                // let mut r = EventReader::new(event, &self.reader_config);
+                // let m = r.to_map();
+                // println!("event map: {:?}", m);
                 let data = DataNasdaqBasicState {
                     code: symbol.to_string(),
                     ask_price: reader.find(10).unwrap_or(CFValue::Double(0.0)).to_f64(),
@@ -334,7 +340,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                     market_phase: reader.find(1709).unwrap_or(CFValue::Int(1)).to_i64().into(),
                     exchange: reader.find(3240).unwrap_or(CFValue::String("".into())).to_string(),
                 };
-                println!("new data: {:?}", data);
+                // println!("new data: {:?}", data);
                 self.state.insert(key.clone(), data);
                 None
             }
