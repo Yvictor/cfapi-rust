@@ -40,7 +40,7 @@ impl DiskSink {
 }
 
 impl<In: Serialize> SinkExt<In> for DiskSink {
-    fn build(id: &str) -> Self {
+    fn build(_id: &str) -> Self {
         let path = dotenvy::var("DISK_SINK_PATH").unwrap_or_else(|_| "disk_sink.log".to_string());
         Self::new(&path).unwrap()
     }

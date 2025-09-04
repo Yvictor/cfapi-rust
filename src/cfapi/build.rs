@@ -4,7 +4,7 @@ fn main() -> miette::Result<()> {
     // let mut b =
     //     autocxx_build::Builder::new("src/main.rs", &[&path, &path_cfapi_include]).build()?;
     let mut b =
-        autocxx_build::Builder::new("src/binding.rs", &[&path, &path_cfapi_include]).build()?;
+        autocxx_build::Builder::new("src/binding.rs", &[&path, &path_cfapi_include]).extra_clang_args(&["-D_GLIBCXX_USE_CXX11_ABI=1"]).build()?;
     // This assumes all your C++ bindings are in main.rs
     b.flag_if_supported("-std=c++14")
         // .link_lib_modifier("-l dylib=sample")

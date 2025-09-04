@@ -10,6 +10,10 @@ pub enum SinkError {
     DiskSinkReadFile { source: io::Error },
     #[snafu(display("DiskSink Path Error: {}", source))]
     DiskSinkPath { source: std::convert::Infallible },
+    #[snafu(display("Redis Connection Error: {}", source))]
+    RedisConnection { source: ::redis::RedisError },
+    #[snafu(display("Redis Command Error: {}", source))]
+    RedisCommand { source: ::redis::RedisError },
 }
 
 // pub trait SinkConfig {
@@ -36,8 +40,10 @@ pub trait Dest {
 pub mod abstain;
 pub mod console;
 pub mod disk;
-pub mod solace;
+pub mod redis;
+// pub mod solace;
 pub use abstain::DoNothingSink;
 pub use console::ConsoleSink;
 pub use disk::DiskSink;
-pub use solace::SolaceSink;
+pub use redis::RedisSink;
+// pub use solace::SolaceSink;

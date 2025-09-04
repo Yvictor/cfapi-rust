@@ -188,9 +188,11 @@ impl BaseMessageEventHandler {
 
 impl cfapi::MessageEventHandler_methods for BaseMessageEventHandler {
     fn onMessageEvent(&mut self, event: &cfapi::MessageEvent) {
+        // tracing::info!("onMessageEvent start");
         for handler in &mut self.handlers {
             handler.on_message_event(event);
         }
+        // tracing::info!("onMessageEvent end");
     }
 }
 

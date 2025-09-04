@@ -4,14 +4,14 @@ use cfapi::event_reader::{EventReader, EventReaderSerConfig};
 use cfapi::value::CFValue;
 use dashmap::DashMap;
 
-use crate::sink::Dest;
 use super::Convertor;
+use crate::sink::Dest;
 use itertools::Itertools;
+use minitrace::prelude::LocalSpan;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info, warn};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::convert::Into;
-use serde_repr::{Serialize_repr, Deserialize_repr};
-
+use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
@@ -25,7 +25,7 @@ pub enum MarketPhase {
 impl Default for MarketPhase {
     fn default() -> Self {
         MarketPhase::Closed
-    }   
+    }
 }
 
 impl Into<MarketPhase> for i64 {
@@ -38,10 +38,7 @@ impl Into<MarketPhase> for i64 {
             _ => MarketPhase::Closed,
         }
     }
-    
 }
-
-
 
 // snapshot
 // '(207)ASK.CLOSE': 167.76,
@@ -65,7 +62,6 @@ impl Into<MarketPhase> for i64 {
 
 //update
 
-
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 pub struct DataNasdaqBasicState {
     exchange: String, // 3240
@@ -84,13 +80,13 @@ pub struct DataNasdaqBasicState {
     open: f64,
     high: f64,
     low: f64,
-    market_phase: MarketPhase, // 1709 
-    price_chg: f64, // 361
-    pct_chg: f64,   // 362
-                    // bid_side_total_vol: i64,
-                    // ask_side_total_vol: i64,
-                    // bid_side_total_cnt: i64,
-                    // ask_side_total_cnt: i64,
+    market_phase: MarketPhase, // 1709
+    price_chg: f64,            // 361
+    pct_chg: f64,              // 362
+                               // bid_side_total_vol: i64,
+                               // ask_side_total_vol: i64,
+                               // bid_side_total_cnt: i64,
+                               // ask_side_total_cnt: i64,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -221,10 +217,10 @@ impl Dest for DataNasdaqBasicV1 {
     }
 }
 
-
 impl Convertor for NasdaqBasicConvertorV1 {
     type Out = DataNasdaqBasicV1;
 
+    #[minitrace::trace]
     fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
         if src != 533 {
@@ -241,24 +237,96 @@ impl Convertor for NasdaqBasicConvertorV1 {
         // let status_code = i32::from(event.getStatusCode());
         // let tag = event.getTag();
         // debug!("event type: {:?}, status code: {}, tag: {}", event_type, (status_code), tag);
+        let _g = LocalSpan::enter_with_local_parent("reader");
         let mut reader = EventReader::new(event, &self.reader_config);
-
+        let _g = LocalSpan::enter_with_local_parent("state");
         let data = match self.state.get_mut(&key) {
             Some(mut state) => {
                 let mut is_tick = false;
                 let mut is_bidask = false;
+                let _g = LocalSpan::enter_with_local_parent("update_state");
+                // for token in [10, 11, 12, 13, 16, 55, 361, 362, 447, 448, 463, 1709] {
+                //     let _g = LocalSpan::enter_with_local_parent(format!("t{}", token));
+                //     match token {
+                //         10 => {
+                //             is_bidask = true;
+                //             if let Some(value) = reader.find(token) {
+                //                 state.ask_price = value.to_f64();
+                //             }
+                //         }
+                //         11 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.ask_volume = value.to_i64();
+                //             }
+                //         }
+                //         12 => {
+                //             is_bidask = true;
+                //             if let Some(value) = reader.find(token) {
+                //                 state.bid_price = value.to_f64();
+                //             }
+                //         }
+                //         13 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.bid_volume = value.to_i64();
+                //             }
+                //         }
+                //         16 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.ts = value.to_f64();
+                //             }
+                //         }
+                //         55 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.exchange_ts = value.to_i64();
+                //             }
+                //         }
+                //         361 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.price_chg = value.to_f64();
+                //             }
+                //         }
+                //         362 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.pct_chg = value.to_f64();
+                //             }
+                //         }
+                //         447 => {
+                //             is_tick = true;
+                //             if let Some(value) = reader.find(token) {
+                //                 state.close = value.to_f64();
+                //             }
+                //         }
+                //         448 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.volume = value.to_i64();
+                //             }
+                //         }
+                //         463 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.total_volume = value.to_i64();
+                //             }
+                //         }
+                //         1709 => {
+                //             if let Some(value) = reader.find(token) {
+                //                 state.market_phase = value.to_i64().into();
+                //             }
+                //         }
+                //         _ => {}
+                //     }
+                // }
+                
                 for (token, value) in reader.iter_with_token_number() {
-                    // TODO only update the field that has value
+                    // let _g = LocalSpan::enter_with_local_parent(format!("t{}", token));
                     match token {
                         10 => {
                             is_bidask = true;
                             state.ask_price = value.to_f64()
-                        },
+                        }
                         11 => state.ask_volume = value.to_i64(),
                         12 => {
                             is_bidask = true;
                             state.bid_price = value.to_f64()
-                        },
+                        }
                         13 => state.bid_volume = value.to_i64(),
                         16 => state.ts = value.to_f64(),
                         55 => state.exchange_ts = value.to_i64(),
@@ -267,7 +335,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                         447 => {
                             is_tick = true;
                             state.close = value.to_f64()
-                        },
+                        }
                         448 => state.volume = value.to_i64(),
                         // 460 => state.total_amount = value.to_i64(),
                         // 22 => state.amount = value.to_i64(),
@@ -275,12 +343,13 @@ impl Convertor for NasdaqBasicConvertorV1 {
                         1709 => state.market_phase = value.to_i64().into(),
                         // 23 => update_int(value, &mut state.total_volume, "total_volume"),
                         _ => {
-                            debug!("token: {}, value: {:?}", token, value);
+                            // debug!("token: {}, value: {:?}", token, value);
                         }
                     }
                 }
                 // println!("updated state: {:?}", state.clone());
                 let data = if is_tick {
+                    let _g = LocalSpan::enter_with_local_parent("tick");
                     Some(DataNasdaqBasicV1::Tick(NBTick {
                         _dest: format!("api/V1/TIC/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
@@ -297,6 +366,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                         market_phase: state.market_phase.clone(),
                     }))
                 } else if is_bidask {
+                    let _g = LocalSpan::enter_with_local_parent("bidask");
                     Some(DataNasdaqBasicV1::BidAsk(NBBidAsk {
                         _dest: format!("api/V1/QUO/{}/{}", state.exchange, state.code),
                         exchange: state.exchange.clone(),
@@ -319,6 +389,8 @@ impl Convertor for NasdaqBasicConvertorV1 {
                 // let mut r = EventReader::new(event, &self.reader_config);
                 // let m = r.to_map();
                 // println!("event map: {:?}", m);
+                let _g = LocalSpan::enter_with_local_parent("new_state")
+                    .with_property(|| ("symbol", key.clone()));
                 let data = DataNasdaqBasicState {
                     code: symbol.to_string(),
                     ask_price: reader.find(10).unwrap_or(CFValue::Double(0.0)).to_f64(),
@@ -332,13 +404,16 @@ impl Convertor for NasdaqBasicConvertorV1 {
                     pct_chg: reader.find(362).unwrap_or(CFValue::Double(0.0)).to_f64(),
                     high: reader.find(389).unwrap_or(CFValue::Double(0.0)).to_f64(), // 389 is official high 388 is ice not exise in pre market
                     low: reader.find(395).unwrap_or(CFValue::Double(0.0)).to_f64(), // 395 is official low 394 is ice not exise in pre market
-                    open: reader.find(401).unwrap_or(CFValue::Double(0.0)).to_f64(),// 401 is official open not exise in pre market
+                    open: reader.find(401).unwrap_or(CFValue::Double(0.0)).to_f64(), // 401 is official open not exise in pre market
                     close: reader.find(447).unwrap_or(CFValue::Double(0.0)).to_f64(),
                     volume: reader.find(448).unwrap_or(CFValue::Int(0)).to_i64(),
                     total_amount: reader.find(460).unwrap_or(CFValue::Int(0)).to_i64(),
                     total_volume: reader.find(463).unwrap_or(CFValue::Int(0)).to_i64(),
                     market_phase: reader.find(1709).unwrap_or(CFValue::Int(1)).to_i64().into(),
-                    exchange: reader.find(3240).unwrap_or(CFValue::String("".into())).to_string(),
+                    exchange: reader
+                        .find(3240)
+                        .unwrap_or(CFValue::String("".into()))
+                        .to_string(),
                 };
                 // println!("new data: {:?}", data);
                 self.state.insert(key.clone(), data);

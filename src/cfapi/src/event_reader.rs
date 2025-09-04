@@ -1,6 +1,7 @@
 use super::binding::{GetEventReader, MessageEvent, MessageEvent_Types, MessageReader, ValueTypes};
 use super::value::CFValue;
 use std::collections::BTreeMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub struct EventReaderSerConfig {
     with_event_type: bool,
@@ -178,22 +179,32 @@ impl<'a> EventReader<'a> {
                 MessageEvent_Types::UPDATE => "UPDATE",
             };
             map.insert(
-                "(0)EventType".to_owned(),
+                "(0000)EventType".to_owned(),
                 CFValue::String(event_type.to_owned()),
             );
         }
         if self.ser_config.with_src {
             map.insert(
-                "(1)Source".to_owned(),
+                "(0001)Source".to_owned(),
                 CFValue::Int(i32::from(self.event.getSource()) as i64),
             );
         }
         let symbol = self.event.getSymbol();
-        map.insert("(2)Symbol".to_owned(), CFValue::String(symbol.to_string()));
+        map.insert("(0002)Symbol".to_owned(), CFValue::String(symbol.to_string()));
 
         for (token_number, token_name, value) in self.iter_with_token_num_name() {
-            map.insert(format!("({}){}", token_number, token_name), value);
+            map.insert(format!("({:04}){}", token_number, token_name), value);
         }
+        map.insert(
+            "#T".to_owned(),
+            CFValue::Datetime(
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_micros() as f64
+                    / 1000000.0,
+            ),
+        );
 
         map
     }

@@ -5,11 +5,11 @@ use super::sink::SinkExt;
 use cfapi::binding::MessageEvent;
 
 use cfapi::message_event::MessageEventHandlerExt;
-use crossbeam_queue::ArrayQueue;
 use tracing::{error, info};
 // use crossbeam_utils::thread::scope;
 use super::convertor::Convertor;
 use crossbeam_channel::{bounded, unbounded, TrySendError};
+use minitrace::prelude::{LocalSpan, Span, SpanContext};
 
 pub struct PipeQueueMessageHandler<C, F, R>
 where
@@ -26,6 +26,8 @@ where
     send: crossbeam_channel::Sender<C::Out>,
     recv_back: crossbeam_channel::Receiver<C::Out>,
     send_back: crossbeam_channel::Sender<C::Out>,
+    // recv_event: crossbeam_channel::Receiver<MessageEvent>,
+    // send_event: crossbeam_channel::Sender<MessageEvent>,
     n: usize,
     _formater: PhantomData<F>,
     _sink: PhantomData<R>,
@@ -59,6 +61,7 @@ where
     {
         let (send, recv) = bounded(size);
         let (send_back, recv_back) = unbounded();
+        // let (send_event, recv_event) = unbounded();
         Self {
             convertor,
             // formater,
@@ -67,6 +70,8 @@ where
             send,
             recv_back,
             send_back,
+            // recv_event,
+            // send_event,
             n,
             _formater: PhantomData,
             _sink: PhantomData,
@@ -109,6 +114,7 @@ where
     {
         for i in 0..self.n {
             let recv = self.recv.clone();
+            // tracing::info!("exec_loop_th: {}", i);
             let id = i.to_string();
             std::thread::spawn(move || {
                 let formater = F::default();
@@ -140,7 +146,7 @@ where
                         Ok(data) => {
                             // info!("data: {:?}", data);
                             // println!("data: {:?}", data);
-                            sink.exec(&data, &formater);
+                            // sink.exec(&data, &formater);
                         }
                         Err(_) => {
                             error!("channel is empty");
@@ -149,6 +155,17 @@ where
                 }
             });
         }
+        let recv = self.recv.clone();
+        let recv_back = self.recv_back.clone();
+        std::thread::spawn(move || {
+            loop {
+                let queue_size = recv.len();
+                let backup_queue_size = recv_back.len();
+                info!("queue size: {} backup queue size: {}", queue_size, backup_queue_size);
+                std::thread::sleep(std::time::Duration::from_secs(60));
+            }
+        });
+
     }
 
     pub fn get_queue_size(&self) -> usize {
@@ -167,9 +184,13 @@ where
         if event.getSource() == autocxx::c_int(0) {
             return;
         }
+        // self.send_event.send(event);
+        let root = Span::root("on_msg", SpanContext::random());
+        let _guard = root.set_local_parent();
         let data = self.convertor.convert(event);
         match data {
             Some(data) => {
+                let _g = LocalSpan::enter_with_local_parent("send_data");
                 match self.send.try_send(data) {
                     Ok(_) => {
                         // info!("send");
