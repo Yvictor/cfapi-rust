@@ -43,7 +43,7 @@ pub mod redis;
 #[cfg(feature = "solace")]
 pub mod solace;
 pub use abstain::DoNothingSink;
-pub use console::ConsoleSink;
+pub use console::{ConsoleSink, SolaceConsoleSink};
 pub use disk::DiskSink;
 pub use redis::RedisSink;
 #[cfg(feature = "solace")]

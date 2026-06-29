@@ -71,6 +71,26 @@ fn cfapi_hosts(default_host: &str) -> Vec<String> {
     hosts.into_iter().collect()
 }
 
+fn load_symbols(path: &str, limit: usize) -> Vec<String> {
+    let content = std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("failed to read symbol file {}: {}", path, error));
+    let mut symbols = Vec::with_capacity(limit);
+    for line in content.lines() {
+        let line = line.split('#').next().unwrap_or("");
+        for symbol in line
+            .split(|ch: char| ch == ',' || ch == ';' || ch.is_whitespace())
+            .map(str::trim)
+            .filter(|symbol| !symbol.is_empty())
+        {
+            symbols.push(symbol.to_ascii_uppercase());
+            if symbols.len() == limit {
+                return symbols;
+            }
+        }
+    }
+    symbols
+}
+
 fn main() {
     dotenvy::dotenv().ok();
     let args = Args::parse();
@@ -78,6 +98,12 @@ fn main() {
     let cfapi_host = dotenvy::var("CFAPI_HOST").unwrap_or("216.221.209.61:7022".to_string());
     let cfapi_user = dotenvy::var("CFAPI_USER").unwrap_or("SINOCANNED".to_string());
     let cfapi_pass = dotenvy::var("CFAPI_PASS").expect("CFAPI_PASS must be set");
+    let symbol_file = dotenvy::var("CFVHUB_SYMBOL_FILE").ok();
+    let symbols = symbol_file
+        .as_deref()
+        .map(|path| load_symbols(path, 5_000))
+        .unwrap_or_default();
+    let source_id = dotenvy::var("CFVHUB_SOURCE_ID").unwrap_or_else(|_| "533".to_string());
     // let reporter =
     //     // minitrace_jaeger::JaegerReporter::new("128.110.5.124:6831".parse().unwrap(), "cfvhub")
     //     //     .unwrap();
@@ -128,6 +154,8 @@ fn main() {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(args.sink_thread as i64),
         )
+        .with_watchlist(!symbols.is_empty())
+        .with_max_watchlist_size(5_000)
         .with_queue_depth_threshold_percent(5);
     let main_connection_config = ConnectionConfig::default().with_queue_size(128);
     // let backup_connection_config = ConnectionConfig::default().with_backup(true);
@@ -163,17 +191,27 @@ fn main() {
     //         Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
     //     );
     // }
-    if dotenvy::var("CFVHUB_WILDCARD").ok().as_deref() == Some("1") {
+    if !symbols.is_empty() {
+        info!(
+            source_id = source_id.as_str(),
+            symbol_count = symbols.len(),
+            symbol_file = symbol_file.as_deref().unwrap_or(""),
+            "subscribe symbol file"
+        );
+        for symbol in &symbols {
+            api.request(&source_id, symbol, Commands::QUERYSNAPANDSUBSCRIBE);
+        }
+    } else if dotenvy::var("CFVHUB_WILDCARD").ok().as_deref() == Some("1") {
         api.request(
-            "533",
+            &source_id,
             &format!("{{^{}}}", args.subscribe_pattern),
             Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
         );
     } else {
-        api.request("533", "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
-        api.request("533", "NVDA", Commands::QUERYSNAPANDSUBSCRIBE);
-        // api.request("533", "AAPL", Commands::SUBSCRIBE);
-        // api.request("533", "AAPL", Commands::QUERYSNAP);
+        api.request(&source_id, "AAPL", Commands::QUERYSNAPANDSUBSCRIBE);
+        api.request(&source_id, "NVDA", Commands::QUERYSNAPANDSUBSCRIBE);
+        // api.request(&source_id, "AAPL", Commands::SUBSCRIBE);
+        // api.request(&source_id, "AAPL", Commands::QUERYSNAP);
         api.request("534", "NKE", Commands::QUERYSNAPANDSUBSCRIBE);
     }
     // api.request("533", "{^A}", Commands::QUERYSNAPANDSUBSCRIBEWILDCARD);
