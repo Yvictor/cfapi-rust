@@ -190,7 +190,10 @@ impl<'a> EventReader<'a> {
             );
         }
         let symbol = self.event.getSymbol();
-        map.insert("(0002)Symbol".to_owned(), CFValue::String(symbol.to_string()));
+        map.insert(
+            "(0002)Symbol".to_owned(),
+            CFValue::String(symbol.to_string()),
+        );
 
         for (token_number, token_name, value) in self.iter_with_token_num_name() {
             map.insert(format!("({:04}){}", token_number, token_name), value);

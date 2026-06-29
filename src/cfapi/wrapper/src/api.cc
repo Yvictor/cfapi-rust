@@ -1,5 +1,15 @@
 #include "api.h"
 
+RustMessageEventHandler::RustMessageEventHandler(std::uintptr_t handler_id)
+    : handler_id(handler_id)
+{
+}
+
+void RustMessageEventHandler::onMessageEvent(const cfapi::MessageEvent &event)
+{
+    cfapi_rust_on_message_event(handler_id, event);
+}
+
 APIFactoryWrap::APIFactoryWrap(const std::string &appName, const std::string &appVersion,
                                bool debug, const std::string &logFileName, std::string usage,
                                const std::string &username, const std::string &password,
@@ -57,6 +67,13 @@ void APIFactoryWrap::setConnectionConfig(std::string &host_info, bool backup,
 void APIFactoryWrap::registerMessageEventHandler(const cfapi::MessageEventHandler &messageHandler)
 {
     (*session).registerMessageEventHandler(&const_cast<cfapi::MessageEventHandler &>(messageHandler));
+};
+
+
+void APIFactoryWrap::registerRustMessageEventHandler(std::uintptr_t handler_id)
+{
+    rustMessageHandler = std::make_unique<RustMessageEventHandler>(handler_id);
+    (*session).registerMessageEventHandler(rustMessageHandler.get());
 };
 
 void APIFactoryWrap::registerStatisticsEventHandler(const cfapi::StatisticsEventHandler &statsEH, int interval)

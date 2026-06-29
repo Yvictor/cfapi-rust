@@ -1,4 +1,4 @@
-use super::{SinkExt, FormaterExt, Formated};
+use super::{Formated, FormaterExt, SinkExt};
 use serde::Serialize;
 
 #[derive(Debug, Default)]

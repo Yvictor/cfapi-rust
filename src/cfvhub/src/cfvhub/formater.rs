@@ -6,14 +6,14 @@ pub enum FormatError {
     #[snafu(display("Error Eecode Json: {}", source))]
     Json { source: serde_json::Error },
     #[snafu(display("Error Eecode Yaml: {}", source))]
-    Yaml{ source: serde_yaml::Error },
+    Yaml { source: serde_yaml::Error },
     #[snafu(display("Error Eecode Toml: {}", source))]
-    Toml{ source: toml::ser::Error },
+    Toml { source: toml::ser::Error },
     #[snafu(display("Error Eecode MessagePack: {}", source))]
-    MessagePack{ source: rmp_serde::encode::Error },
+    MessagePack { source: rmp_serde::encode::Error },
 }
 
-pub trait FormaterExt<In> 
+pub trait FormaterExt<In>
 where
     In: Serialize,
 {
@@ -33,14 +33,15 @@ impl<I> FormaterExt<I> for JsonFormater
 where
     I: Serialize,
 {
-    fn format(&self,input: &I) -> Result<Formated, FormatError> {
-        Ok(Formated::String(serde_json::to_string(input).context(JsonSnafu)?))
+    fn format(&self, input: &I) -> Result<Formated, FormatError> {
+        Ok(Formated::String(
+            serde_json::to_string(input).context(JsonSnafu)?,
+        ))
     }
     fn content_type(&self) -> &str {
         "json"
     }
 }
-
 
 #[derive(Debug, Default)]
 pub struct YamlFormater;
@@ -49,8 +50,10 @@ impl<I> FormaterExt<I> for YamlFormater
 where
     I: Serialize,
 {
-    fn format(&self,input: &I) -> Result<Formated, FormatError> {
-        Ok(Formated::String(serde_yaml::to_string(input).context(YamlSnafu)?))
+    fn format(&self, input: &I) -> Result<Formated, FormatError> {
+        Ok(Formated::String(
+            serde_yaml::to_string(input).context(YamlSnafu)?,
+        ))
     }
     fn content_type(&self) -> &str {
         "yaml"
@@ -64,7 +67,7 @@ impl<I> FormaterExt<I> for TomlFormater
 where
     I: Serialize,
 {
-    fn format(&self,input: &I) -> Result<Formated, FormatError> {
+    fn format(&self, input: &I) -> Result<Formated, FormatError> {
         Ok(Formated::String(toml::to_string(input).context(TomlSnafu)?))
     }
     fn content_type(&self) -> &str {
@@ -79,8 +82,10 @@ impl<I> FormaterExt<I> for MessagePackFormater
 where
     I: Serialize,
 {
-    fn format(&self,input: &I) -> Result<Formated, FormatError> {
-        Ok(Formated::Bytes(rmp_serde::to_vec(input).context(MessagePackSnafu)?))
+    fn format(&self, input: &I) -> Result<Formated, FormatError> {
+        Ok(Formated::Bytes(
+            rmp_serde::to_vec(input).context(MessagePackSnafu)?,
+        ))
     }
     fn content_type(&self) -> &str {
         "msgpack"

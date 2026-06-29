@@ -12,8 +12,44 @@ use serde::{Deserialize, Serialize};
 // use std::io::prelude::Write;
 // use tracing::{debug, error, info, span, Level};
 
-pub trait MessageEventHandlerExt {
-    fn on_message_event(&mut self, event: &MessageEvent);
+pub trait MessageEventHandlerExt: Send + Sync {
+    fn on_message_event(&self, event: &MessageEvent);
+}
+
+pub struct MessageEventDispatcher {
+    handlers: Vec<Box<dyn MessageEventHandlerExt + Send + Sync + 'static>>,
+}
+
+impl MessageEventDispatcher {
+    pub fn new(handlers: Vec<Box<dyn MessageEventHandlerExt + Send + Sync + 'static>>) -> Self {
+        let handlers = if handlers.is_empty() {
+            vec![Box::new(DefaultMessageEventHandler::default())
+                as Box<dyn MessageEventHandlerExt + Send + Sync>]
+        } else {
+            handlers
+        };
+        Self { handlers }
+    }
+
+    pub fn on_message_event(&self, event: &MessageEvent) {
+        for handler in &self.handlers {
+            handler.on_message_event(event);
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn cfapi_rust_on_message_event(dispatcher: usize, event: *const MessageEvent) {
+    if dispatcher == 0 {
+        return;
+    }
+
+    let dispatcher = unsafe { &*(dispatcher as *const MessageEventDispatcher) };
+    let Some(event) = (unsafe { event.as_ref() }) else {
+        return;
+    };
+
+    dispatcher.on_message_event(event);
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
@@ -33,7 +69,7 @@ pub struct DefaultMessageEventHandler {
 }
 
 impl MessageEventHandlerExt for DefaultMessageEventHandler {
-    fn on_message_event(&mut self, event: &MessageEvent) {
+    fn on_message_event(&self, event: &MessageEvent) {
         let mut event_reader = EventReader::new(&event, &self.reader_config);
         info!("DATA: { }", event_reader.to_json().unwrap());
         // info!("DATA");

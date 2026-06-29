@@ -314,7 +314,7 @@ impl Convertor for NasdaqBasicConvertorV1 {
                 //         _ => {}
                 //     }
                 // }
-                
+
                 for (token, value) in reader.iter_with_token_number() {
                     // let _g = LocalSpan::enter_with_local_parent(format!("t{}", token));
                     match token {

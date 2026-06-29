@@ -20,7 +20,6 @@ pub enum SinkError {
 //     fn config(&self);
 // }
 
-
 pub trait SinkExt<In>
 where
     In: Serialize,

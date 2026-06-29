@@ -10,7 +10,6 @@ pub enum CFValue {
     Unknown,
 }
 
-
 impl CFValue {
     pub fn to_i64(self) -> i64 {
         match self {

@@ -1,4 +1,4 @@
-use super::{SinkExt, FormaterExt};
+use super::{FormaterExt, SinkExt};
 use serde::Serialize;
 
 #[derive(Debug, Default)]
@@ -14,4 +14,3 @@ impl<In: Serialize> SinkExt<In> for DoNothingSink {
         let _formated = formater.format(input);
     }
 }
-

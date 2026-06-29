@@ -1,16 +1,13 @@
-
 use ahash::RandomState;
 use cfapi::binding::MessageEvent;
 use cfapi::event_reader::{EventReader, EventReaderSerConfig};
 use cfapi::value::CFValue;
 use dashmap::DashMap;
 
-use std::collections::BTreeMap;
-use tracing::{debug, info};
 use super::Convertor;
 use itertools::Itertools;
-
-
+use std::collections::BTreeMap;
+use tracing::{debug, info};
 
 pub struct StatefulBTreeMapConvertor {
     reader_config: EventReaderSerConfig,

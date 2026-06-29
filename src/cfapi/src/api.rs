@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use super::binding::{
-    APIFactoryWrap, BaseMessageEventHandler, BaseSessionEventHandler, BaseStatisticsEventHandler,
-    BaseUserEventHandler, Commands,
+    APIFactoryWrap, BaseSessionEventHandler, BaseStatisticsEventHandler, BaseUserEventHandler,
+    Commands,
 };
-use super::message_event::MessageEventHandlerExt;
+use super::message_event::{MessageEventDispatcher, MessageEventHandlerExt};
 use super::session_event::SessionEventHandlerExt;
 use super::stat_event::StatisticsEventHandlerExt;
 use super::user_event::UserEventHandlerExt;
@@ -304,26 +305,25 @@ pub struct CFAPI {
     api: UniquePtr<APIFactoryWrap>,
     _user_event_handler: Rc<RefCell<BaseUserEventHandler>>,
     _session_event_handler: Rc<RefCell<BaseSessionEventHandler>>,
-    _message_event_handler: Rc<RefCell<BaseMessageEventHandler>>,
+    _message_event_handler: Arc<MessageEventDispatcher>,
     _statistics_event_handler: Rc<RefCell<BaseStatisticsEventHandler>>,
 }
 
 impl CFAPI {
     pub fn new(
         config: CFAPIConfig,
-        user_event_handlers: Vec<Box<dyn UserEventHandlerExt + 'static>>,
-        session_event_handlers: Vec<Box<dyn SessionEventHandlerExt>>,
-        message_event_handlers: Vec<Box<dyn MessageEventHandlerExt>>,
-        statistics_event_handlers: Vec<Box<dyn StatisticsEventHandlerExt>>,
+        user_event_handlers: Vec<Box<dyn UserEventHandlerExt + Send + 'static>>,
+        session_event_handlers: Vec<Box<dyn SessionEventHandlerExt + Send>>,
+        message_event_handlers: Vec<Box<dyn MessageEventHandlerExt + Send + Sync>>,
+        statistics_event_handlers: Vec<Box<dyn StatisticsEventHandlerExt + Send>>,
     ) -> Self {
         let user_event_handler =
             BaseUserEventHandler::new_rust_owned(BaseUserEventHandler::new(user_event_handlers));
         let session_event_handler = BaseSessionEventHandler::new_rust_owned(
             BaseSessionEventHandler::new(session_event_handlers),
         );
-        let message_event_handler = BaseMessageEventHandler::new_rust_owned(
-            BaseMessageEventHandler::new(message_event_handlers),
-        );
+        let message_event_handler = Arc::new(MessageEventDispatcher::new(message_event_handlers));
+        let message_event_handler_ptr = Arc::as_ptr(&message_event_handler) as usize;
         let statistics_event_handler = BaseStatisticsEventHandler::new_rust_owned(
             BaseStatisticsEventHandler::new(statistics_event_handlers),
         );
@@ -345,7 +345,7 @@ impl CFAPI {
         )
         .within_unique_ptr();
         api.pin_mut()
-            .registerMessageEventHandler(message_event_handler.as_ref().borrow().as_ref());
+            .registerRustMessageEventHandler(autocxx::c_ulong(message_event_handler_ptr as u64));
         api.pin_mut().registerStatisticsEventHandler(
             statistics_event_handler.as_ref().borrow().as_ref(),
             autocxx::c_int(config.statistics_interval),
@@ -359,7 +359,10 @@ impl CFAPI {
         }
     }
 
-    pub fn add_user_event_handler(&mut self, user_event_handler: Box<dyn UserEventHandlerExt>) {
+    pub fn add_user_event_handler(
+        &mut self,
+        user_event_handler: Box<dyn UserEventHandlerExt + Send>,
+    ) {
         self._user_event_handler
             .as_ref()
             .borrow_mut()
@@ -375,7 +378,7 @@ impl CFAPI {
 
     pub fn add_session_event_handler(
         &mut self,
-        session_event_handler: Box<dyn SessionEventHandlerExt>,
+        session_event_handler: Box<dyn SessionEventHandlerExt + Send>,
     ) {
         self._session_event_handler
             .as_ref()
@@ -392,24 +395,18 @@ impl CFAPI {
 
     pub fn add_message_event_handler(
         &mut self,
-        message_event_handler: Box<dyn MessageEventHandlerExt>,
+        _message_event_handler: Box<dyn MessageEventHandlerExt + Send + Sync>,
     ) {
-        self._message_event_handler
-            .as_ref()
-            .borrow_mut()
-            .add_handler(message_event_handler);
+        panic!("message handlers must be registered when CFAPI is constructed for the thread-safe bridge");
     }
 
     pub fn clear_message_event_handlers(&mut self) {
-        self._message_event_handler
-            .as_ref()
-            .borrow_mut()
-            .clear_handlers();
+        panic!("message handlers cannot be cleared after CFAPI is constructed for the thread-safe bridge");
     }
 
     pub fn add_statistics_event_handler(
         &mut self,
-        statistics_event_handler: Box<dyn StatisticsEventHandlerExt>,
+        statistics_event_handler: Box<dyn StatisticsEventHandlerExt + Send>,
     ) {
         self._statistics_event_handler
             .as_ref()

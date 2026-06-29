@@ -1,7 +1,7 @@
 use super::binding::{SessionEvent, SessionEvent_Types};
 use tracing::info;
 
-pub trait SessionEventHandlerExt {
+pub trait SessionEventHandlerExt: Send {
     fn on_session_event(&mut self, event: &SessionEvent);
 }
 
@@ -64,7 +64,7 @@ impl SessionEventHandlerExt for DefaultSessionEventHandler {
     }
 }
 
-impl Default for Box<dyn SessionEventHandlerExt> {
+impl Default for Box<dyn SessionEventHandlerExt + Send> {
     fn default() -> Self {
         Box::new(DefaultSessionEventHandler)
     }

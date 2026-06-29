@@ -1,7 +1,7 @@
 use super::binding::{StatisticsEvent, StatisticsEvent_StatsTypes};
+use serde::{Deserialize, Serialize};
 use tracing::info;
-use serde::{Serialize, Deserialize};
-pub trait StatisticsEventHandlerExt {
+pub trait StatisticsEventHandlerExt: Send {
     fn on_statistics_event(&mut self, event: &StatisticsEvent);
 }
 
@@ -30,7 +30,7 @@ pub struct StatisticsData {
 
 impl std::convert::From<&StatisticsEvent> for StatisticsData {
     fn from(value: &StatisticsEvent) -> Self {
-        StatisticsData{
+        StatisticsData {
             msgs_in: value.getStat(StatisticsEvent_StatsTypes::MSGS_IN),
             msgs_out: value.getStat(StatisticsEvent_StatsTypes::MSGS_OUT),
             drop: value.getStat(StatisticsEvent_StatsTypes::DROP),
@@ -38,19 +38,22 @@ impl std::convert::From<&StatisticsEvent> for StatisticsData {
             pct_full: value.getStat(StatisticsEvent_StatsTypes::PCT_FULL),
             peak_pct_full: value.getStat(StatisticsEvent_StatsTypes::PEAK_PCT_FULL),
             in_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::IN_MSGS_SEC_100MS),
-            peak_in_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::PEAK_IN_MSGS_SEC_100MS),
+            peak_in_msgs_sec_100ms: value
+                .getStat(StatisticsEvent_StatsTypes::PEAK_IN_MSGS_SEC_100MS),
             in_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::IN_MSGS_SEC),
             peak_in_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::PEAK_IN_MSGS_SEC),
             out_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::OUT_MSGS_SEC_100MS),
-            peak_out_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::PEAK_OUT_MSGS_SEC_100MS),
+            peak_out_msgs_sec_100ms: value
+                .getStat(StatisticsEvent_StatsTypes::PEAK_OUT_MSGS_SEC_100MS),
             out_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::OUT_MSGS_SEC),
             peak_out_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::PEAK_OUT_MSGS_SEC),
             net_msgs_out: value.getStat(StatisticsEvent_StatsTypes::NET_MSGS_OUT),
-            net_out_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::NET_OUT_MSGS_SEC_100MS),
-            peak_net_out_msgs_sec_100ms: value.getStat(StatisticsEvent_StatsTypes::PEAK_NET_OUT_MSGS_SEC_100MS),
+            net_out_msgs_sec_100ms: value
+                .getStat(StatisticsEvent_StatsTypes::NET_OUT_MSGS_SEC_100MS),
+            peak_net_out_msgs_sec_100ms: value
+                .getStat(StatisticsEvent_StatsTypes::PEAK_NET_OUT_MSGS_SEC_100MS),
             net_out_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::NET_OUT_MSGS_SEC),
             peak_net_out_msgs_sec: value.getStat(StatisticsEvent_StatsTypes::PEAK_NET_OUT_MSGS_SEC),
-
         }
     }
 }
@@ -64,7 +67,7 @@ impl StatisticsEventHandlerExt for DefaultStatisticsEventHandler {
     }
 }
 
-impl Default for Box<dyn StatisticsEventHandlerExt> {
+impl Default for Box<dyn StatisticsEventHandlerExt + Send> {
     fn default() -> Self {
         Box::new(DefaultStatisticsEventHandler)
     }
