@@ -4,7 +4,7 @@ use rsolace::types::{SolClientLogLevel, SolClientReturnCode};
 use serde::Serialize;
 use tracing::{error, info};
 
-use super::{Dest, Formated, FormaterExt, SinkError, SinkExt};
+use super::{Dest, Formated, FormaterExt, SinkExt};
 
 // #[derive(Debug)]
 #[derive(Serialize)]
@@ -33,7 +33,7 @@ fn load_session_props_from_dotenv() -> SessionProps {
         .connect_retries(
             dotenvy::var("SOLACE_CONNECT_RETRIES")
                 .unwrap_or_else(|_| "3".to_string())
-                .parse::<u32>()
+                .parse::<i32>()
                 .unwrap(),
         )
         .connect_timeout_ms(
@@ -67,21 +67,6 @@ impl SolaceSink {
         } else {
             error!("SolaceSink {} connect error", id);
         }
-        let event_recv = solclient.get_event_receiver();
-        let id_th = id.to_string();
-        let _th_event = std::thread::spawn(move || loop {
-            match event_recv.recv() {
-                Ok(event) => {
-                    tracing::info!("SolaceSink {} {:?}", id_th, event);
-                }
-                Err(e) => {
-                    tracing::error!("SolaceSink {} recv event error: {:?}", id_th, e);
-                    break;
-                }
-            }
-        });
-        // TODO event handle
-
         Self {
             solclient,
             id: id.to_string(),

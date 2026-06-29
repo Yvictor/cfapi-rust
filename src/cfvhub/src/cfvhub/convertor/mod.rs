@@ -9,6 +9,7 @@ pub trait Convertor {
 }
 
 pub mod nasdaq_basic;
+pub mod nasdaq_solace;
 pub mod stateful_map;
 pub mod stateless_map;
 

@@ -1,9 +1,12 @@
 use cfapi::api::{CFAPIConfig, ConnectionConfig, SessionConfig, CFAPI};
 use cfapi::binding::Commands;
-use cfvhub::convertor::stateless_map::BTreeMapConvertor;
-use cfvhub::formater::JsonFormater;
+use cfvhub::convertor::nasdaq_solace::NasdaqSolaceConvertorV1;
+use cfvhub::formater::MessagePackFormater;
 use cfvhub::pipe_thread_local::PipeThreadLocalMessageHandler;
-use cfvhub::sink::DoNothingSink;
+#[cfg(not(feature = "solace"))]
+use cfvhub::sink::DoNothingSink as OutputSink;
+#[cfg(feature = "solace")]
+use cfvhub::sink::SolaceSink as OutputSink;
 // SolaceSink
 use clap::Parser;
 use tracing::{info, Level};
@@ -97,17 +100,10 @@ fn main() {
 
     info!("CFVHUB Start mode: {}", args.mode);
     let pipe_thread_local_message_handler: PipeThreadLocalMessageHandler<
-        // NasdaqBasicConvertorV1,
-        BTreeMapConvertor,
-        JsonFormater,
-        // MessagePackFormater,
-        // SolaceSink,
-        // DiskSink,
-        DoNothingSink,
-    > = PipeThreadLocalMessageHandler::new(
-        BTreeMapConvertor::default(),
-        // NasdaqBasicConvertorV1::default(),
-    );
+        NasdaqSolaceConvertorV1,
+        MessagePackFormater,
+        OutputSink,
+    > = PipeThreadLocalMessageHandler::new(NasdaqSolaceConvertorV1::default());
     pipe_thread_local_message_handler.exec_metrics_loop_th();
     let app_name = format!("CFVHUB-{}", args.subscribe_pattern);
     let config = CFAPIConfig::default()

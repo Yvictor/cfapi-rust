@@ -40,9 +40,11 @@ pub mod abstain;
 pub mod console;
 pub mod disk;
 pub mod redis;
-// pub mod solace;
+#[cfg(feature = "solace")]
+pub mod solace;
 pub use abstain::DoNothingSink;
 pub use console::ConsoleSink;
 pub use disk::DiskSink;
 pub use redis::RedisSink;
-// pub use solace::SolaceSink;
+#[cfg(feature = "solace")]
+pub use solace::SolaceSink;
