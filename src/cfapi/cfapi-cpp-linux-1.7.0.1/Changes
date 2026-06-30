@@ -1,0 +1,220 @@
+1.7.0.1:
+	* RTS-72372: Increase max length of a string value in request from 255 to 4095
+	* RTS-72428: Fix startup crash
+
+1.7.0.0:
+	* RTS-71714: L2 conflation support
+	* RTS-65868: Improve performance when MULTITHREADED_API_CONNECTIONS_BOOL=false
+	* RTS-71633: Fix Alternate index info missing on Query while already subcribed via alternate index
+	* RTS-66601: CFAPI takes too long to login after CM referral
+	* RTS-68763: Fix for missing UserEvents
+	* RTS-67398: In sample, use getValueAsDouble() instead of getValueAsString() in DOUBLE case
+	* RTS-68416: Intervalized JIT conflation support
+
+1.6.1.2:
+	* RTS-64844: Fix double unlock
+
+1.6.1.1:
+	* RTS-63445: fix additional race conditions and remove compiler warnings
+
+1.6.1.0:
+	* Remove inefficiency handling regular expressions to increase request throughput
+	* RTS-59161: GetSourcePortDetails command; add connection timeout to sample programs
+	* RTS-63282: handle QueryXRef with token 5 wildcard on split exchanges
+	* RTS-63445: fix race conditions introduced by snap storm fix
+
+1.6.0.0:
+	* RTS-55202: Support two Linux builds, one built with D_GLIBCXX_USE_CXX11_ABI=0, one built with D_GLIBCXX_USE_CXX11_ABI=1
+	* RTS-54484: Support new command AddAlternateIndex
+	* RTS-55689: Support for slow clients with large snaps:
+		* Prevent API from overflowing queue while processing snaps
+		* Heartbeat timeout no longer triggered by slow client
+
+1.5.0.6:
+	* Remove inefficiency handling regular expressions to increase request throughput
+
+1.5.0.5:
+	* Remove length restriction on split exchange regex from CSP
+
+1.5.0.4:
+    *Fix bug where -218/ERR_PLUSSVR_HOST_BUSY retry causes request to be removed from the watchlist
+	*Increase max queue size from 64MB to 256MB
+
+1.5.0.3:
+	*Add int64_t add interfaces to Request for token 5052
+
+1.5.0.2:
+	*Add in QUERY_REF_TAG for token 5052 for watchlist unsusbcribes
+
+1.5.0.1:
+	* Support send before start
+	* Add MAX_WATCHLIST_SIZE_LONG
+	* Fix handling of different CDD versions from the same CSP
+	* Allow rc=14 to remain in watchlist
+	* Increase default MAX_REQUEST_QUEUE_SIZE_LONG from 100000 to 10000000 when using watchlist
+	* Increase maximum MAX_REQUEST_QUEUE_SIZE_LONG from 10000000 to 50000000.
+
+1.5.0.0:
+	* Watchlist support
+
+1.4.1.3:
+	* Add new token CTF_FILTER_ID/5205
+	* Fix potential deadlock when processing dynamic entitlement updates
+	* Fix issue with dynamic entitlement update failing on first port when using NAT
+
+1.4.1.1:
+	* Support VAP filtering
+
+1.4.1.0:
+	* Support dynamic entitlement updates
+
+1.4.0.3:
+	* Fix issue with missing port when CSP pair configured with overlapping ports
+	* RTS-46839: -220 on news subscription; news data causes sample program crash
+	* RTS-46170: Handle case where CDDs do not match between different boxes in a non-LoadBalancer setup
+
+1.4.0.2:
+	* Modify value of JIT_CONFLATION_THRESHOLD_PERCENT_LONG if out of range to avoid error
+
+1.4.0.1:
+	* Fix for Session restart failure
+
+1.4.0.0:
+	* Support JIT conflation
+	* Fix CSA detection to avoid false positive when using NAT
+ 
+1.3.0.2:
+       *Issue fixed - API not sending status message on sending  QuerySnapAndSubscribeWildCard  with no SRC 
+1.3.0.0: 
+       * Support intervalized Conflation 
+       * New commands - SubscribeWildCard, QuerySnapAndSubscribeWildCard, UnsubscribeWildCard
+       * RTS-39248 - integer division by zero
+1.2.0.1:
+       * Memory corruption fix - avoid drop/skip after wrap around
+1.2.0.0:
+       * Xref changes - connect to all non entitled ports in LB case
+       * LB Initila connection  - Performance Improvemnt for MT mode
+1.1.1.3:
+        * Sample program modified for issue  when -B is passed with no parm       
+        * Request.txt updated with comments
+1.1.1.2       
+       * when connected to both REST and CEF,API is matching with regexp in CEF instead of NYSE on requesting spit exch symbol & request is misrouted
+1.1.1.1:
+        * Fix the issue if Primary and Backup have same ip for direct CSP connection
+1.1.1.0:
+	* Support multiple CSP types - REST,CEF,OPRA for npth non LB and LB api
+1.1.0.8:
+	* Fix routing requests for CEF Ultra
+
+LoadBalance
+1.1.0.7:
+	* Fix for heartbeat timeout issue when CM route is removed and Feed is stopped on CSP- check heartbeat timeout on recovery also 
+1.1.0.6:
+	* Support NAT for CM ip address
+
+1.0.6.4:
+	* Ensure once SESSION_ESTABLISHED API will never stop trying to reconnect to CSP(s)
+	* Fix memory corruption in case of requests to multiple CSP ports.
+
+1.0.6.3:
+	* Add a sample NAT file for use with sample program
+
+1.0.6.2:
+	* Fixes for NAT support
+
+1.0.6.1:
+    * Trim whitespace from NAT ip strings, add a sample NAT file
+
+1.0.6.0:
+	* Support Network Address Translation (NAT)
+
+1.0.5.2:
+	* Fix crash in cfapi_internal::UserEventReactor::clearflagsQPoll 
+
+1.0.5.1:
+	* Support VAP exchanges on V7 CSPs
+
+1.0.5.0:
+	* Support ListUserPermission command
+	* Support MBO/MBP feature
+	* Mark SessionConfig option RECOVERY_BOOL as deprecated
+	* Modify HeartBeat timeout logic to consider any streaming message as a heartbeat
+	* Support QueryXref on exchanges the user is not entitled
+	* Fix bug that causes API thread to freeze in rare case
+
+1.0.4.1:
+	* Fix compiler error in sample program
+	* Fix memory leak in sample program
+
+1.0.4.0:
+1.0.3.1:
+    * Improve high input request rate performance
+
+1.0.3.0:
+    * Change destructor to virtual in MessageEventHandler, SessionEventHandler, and StatisticsEventHandler
+	** This change breaks binary compatibility, so applications must be recompiled.
+
+1.0.2.6:
+    * Fix MessageReader::getValueAsDouble() when valueType==STRING
+
+1.0.2.5:
+    * Add -D_GLIBCXX_USE_CXX11_ABI=0 to sample Makefile
+	* Do not log WARN message for "AltIndex token 3083 not present in response" when underlyer not found
+
+1.0.2.4:
+	* Fix statistics numbers wrapping after 4G on Windows
+
+1.0.2.3:
+	* Fix crash in MessageReaderImpl::getValueAs*() functions
+
+1.0.2.2:
+	* Support QueryXref command
+	* Support using SYMBOL_ESIGNAL_TICKER as an alternate index
+	* Reduce memory usage by reducing CSP queue size from 64MB to 1MB
+	* Add new HostConfig option QUEUE_SIZE_LONG to specify CSP queue size
+	* Only download CDD from first CSP
+	* Fix crash in cfapi_internal::MessageReaderImpl::getTokenNumber()
+
+1.0.2.0:
+	* Suppress extraneous message when Subscribing via an underlyer when no
+	  symbols found
+	* Remove remaining helgrind warnings
+	* Add all commands to request.txt
+
+1.0.1.2:
+    * Fix reconnect to CSP that is slow to restart.
+
+1.0.1.0:
+	* Fix cleanup code to eliminate messages such as "CRIT: Error 
+      delEPoll  5:Bad file descriptor" on failover or shutdown
+	* Fix Windows network bug
+
+1.0.0.12:
+    * Add underlying src/sym as an alternate index
+    * Fix in sample.C for missing first token 3 (PERMISSION) in
+      ListExtendedExchangeInfo when data present in same
+      message as the token 5001 (STATUS type msg)
+    * LISTSUBSCRIBEDSYMBOLS support 
+    * Fix crash caused by misconfigured multi-machine CSP
+    * For QUERYSNAP, add alternate index to MessageEvent to be
+      consistent with QUERYSNAPANDSUBSCRIBE and SUBSCRIBE
+    * Fix helgrind race warning
+    * Suspend session initialization on any login failure
+    * Prevent Session start() from not returning
+
+1.0.0.11:
+	* Fix printing of large int64 values on Windows
+ 	* Document which tokens not to expect in MessageReader
+	* Do not start session unless MessageEventHandler is registered
+
+1.0.0.10:
+    * Cleanup value passed to CSP during Login
+
+1.0.0.9:
+	* Include dropped messages in MSGS_IN and IN_MSGS/SEC stats
+	* Trim whitespace from string request parameter values
+	* Disallow full unsubscribe without source
+	* Clean up debug messages
+
+1.0.0.8:
+	* Not released.

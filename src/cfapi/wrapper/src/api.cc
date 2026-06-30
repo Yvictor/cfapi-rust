@@ -42,6 +42,26 @@ void APIFactoryWrap::setSessionConfigBool(cfapi::SessionConfig::Parameters param
     sessionConfig.set(param, value);
 };
 
+void APIFactoryWrap::setGlobalConnectionConfig(bool backup, bool compression,
+                                               bool conflation_indicator, long conflation_interval,
+                                               long read_timeout, long connection_timeout, long connection_retry_limit,
+                                               long queue_size, long blocking_connection_time_limit,
+                                               long conflation_type, long jit_conflation_threshold_percent)
+{
+    cfapi::ConnectionConfig &connectionConfig = (*session).getConnectionConfig();
+    connectionConfig.set(cfapi::HostConfig::BACKUP_BOOL, backup);
+    connectionConfig.set(cfapi::HostConfig::COMPRESSION_BOOL, compression);
+    connectionConfig.set(cfapi::HostConfig::CONFLATION_INDICATOR_BOOL, conflation_indicator);
+    connectionConfig.set(cfapi::HostConfig::CONFLATION_INTERVAL_LONG, conflation_interval);
+    connectionConfig.set(cfapi::HostConfig::READ_TIMEOUT_LONG, read_timeout);
+    connectionConfig.set(cfapi::HostConfig::CONNECTION_TIMEOUT_LONG, connection_timeout);
+    connectionConfig.set(cfapi::HostConfig::CONNECTION_RETRY_LIMIT_LONG, connection_retry_limit);
+    connectionConfig.set(cfapi::HostConfig::QUEUE_SIZE_LONG, queue_size);
+    connectionConfig.set(cfapi::HostConfig::BLOCKING_CONNECTION_TIME_LIMIT_LONG, blocking_connection_time_limit);
+    connectionConfig.set(cfapi::HostConfig::CONFLATION_TYPE_LONG, conflation_type);
+    connectionConfig.set(cfapi::HostConfig::JIT_CONFLATION_THRESHOLD_PERCENT_LONG, jit_conflation_threshold_percent);
+};
+
 void APIFactoryWrap::setConnectionConfig(std::string &host_info, bool backup,
                                          bool compression, bool conflation_indicator, long conflation_interval,
                                          long read_timeout, long connection_timeout, long connection_retry_limit,
@@ -89,6 +109,14 @@ std::int64_t APIFactoryWrap::sendRequest(const std::string &src_id, const std::s
     req.add(cfapi::SYMBOL_TICKER, symbol);
     req.setCommand(command);
     // std::int64_t ret = ;
+    return (*session).send(req);
+};
+
+std::int64_t APIFactoryWrap::sendCommand(cfapi::Commands command)
+{
+    cfapi::Request &req = (*session).createRequest();
+    req.clearRequest();
+    req.setCommand(command);
     return (*session).send(req);
 };
 bool APIFactoryWrap::startSession()

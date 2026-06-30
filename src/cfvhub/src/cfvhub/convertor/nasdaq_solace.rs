@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::Convertor;
 use crate::sink::Dest;
 
-const NASDAQ_SOURCE: i32 = 533;
+const NASDAQ_SOURCES: &[i32] = &[533, 534];
 
 #[derive(Debug, Default, Clone)]
 struct SymbolState {
@@ -84,6 +84,8 @@ pub struct NasdaqBidAsk {
     ask_volume: Vec<u64>,
     market_phase: u8,
     tradable_status: u8,
+    #[serde(rename = "SerialNum")]
+    serial_num: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -127,24 +129,28 @@ impl Convertor for NasdaqSolaceConvertorV1 {
 
     fn convert(&self, event: &MessageEvent) -> Option<Self::Out> {
         let src = i32::from(event.getSource());
-        if src != NASDAQ_SOURCE {
+        if !NASDAQ_SOURCES.contains(&src) {
             return None;
         }
 
         let symbol = event.getSymbol().to_string();
+        let state_key = format!("{}.{}", src, symbol);
         let mut reader = EventReader::new(event, &self.reader_config);
         let mut update = MessageUpdate::default();
         for (token, value) in reader.iter_with_token_number() {
             update.apply(token, value);
         }
 
-        let mut state = self
-            .state
-            .entry(symbol.clone())
-            .or_insert_with(|| SymbolState {
-                code: symbol.clone(),
-                ..SymbolState::default()
-            });
+        // TODO: Confirm whether fields that arrive without token 1021 or 20 should be ignored
+        // completely, or whether any source sends required carry-forward state only there.
+        if !update.is_tick && !update.is_bidask {
+            return None;
+        }
+
+        let mut state = self.state.entry(state_key).or_insert_with(|| SymbolState {
+            code: symbol.clone(),
+            ..SymbolState::default()
+        });
         state.apply(&update);
 
         if update.is_tick {
@@ -152,6 +158,7 @@ impl Convertor for NasdaqSolaceConvertorV1 {
             return Some(NasdaqSolaceMessage::Tick(state.to_tick()));
         }
         if update.is_bidask {
+            state.serial_num = state.serial_num.saturating_add(1);
             return Some(NasdaqSolaceMessage::BidAsk(state.to_bidask()));
         }
         None
@@ -188,30 +195,13 @@ impl MessageUpdate {
     fn apply(&mut self, token: i32, value: CFValue) {
         match token {
             5 => {}
-            8 | 447 => {
-                self.is_tick = true;
-                self.close = value_f64(value);
-            }
-            9 | 448 => {
-                self.is_tick = true;
-                self.volume = value_u64(value);
-            }
-            10 => {
-                self.is_bidask = true;
-                self.ask_price = value_f64(value);
-            }
-            11 => {
-                self.is_bidask = true;
-                self.ask_volume = value_u64(value);
-            }
-            12 => {
-                self.is_bidask = true;
-                self.bid_price = value_f64(value);
-            }
-            13 => {
-                self.is_bidask = true;
-                self.bid_volume = value_u64(value);
-            }
+            8 | 447 => self.close = value_f64(value),
+            9 | 448 => self.volume = value_u64(value),
+            10 => self.ask_price = value_f64(value),
+            11 => self.ask_volume = value_u64(value),
+            12 => self.bid_price = value_f64(value),
+            13 => self.bid_volume = value_u64(value),
+            20 => self.is_bidask = true,
             16 => self.datetime = value_string(value),
             55 => self.exchange_datetime = value_string(value),
             316 => self.chg_type = value_u8(value),
@@ -223,6 +213,7 @@ impl MessageUpdate {
             460 => self.total_amount = value_f64(value),
             463 => self.total_volume = value_u64(value),
             474 => self.avg_price = value_f64(value),
+            1021 => self.is_tick = true,
             1708 => self.tradable_status = value_u8(value),
             1709 => self.market_phase = value_u8(value),
             2500 => self.trade_cond = value_u64(value),
@@ -278,7 +269,7 @@ impl SymbolState {
         let close = self.close.unwrap_or_default();
         let volume = self.volume.unwrap_or_default();
         NasdaqTick {
-            dest: format!("V1/TIC/NASDAQ/{}", self.code),
+            dest: format!("IS/V1/TIC/NASDAQ/{}", self.code),
             code: self.code.clone(),
             datetime: self.datetime.clone().unwrap_or_default(),
             exchange_datetime: self.exchange_datetime.clone().unwrap_or_default(),
@@ -310,7 +301,7 @@ impl SymbolState {
 
     fn to_bidask(&self) -> NasdaqBidAsk {
         NasdaqBidAsk {
-            dest: format!("V1/QUO/NASDAQ/{}", self.code),
+            dest: format!("IS/V1/QUO/NASDAQ/{}", self.code),
             code: self.code.clone(),
             datetime: self.datetime.clone().unwrap_or_default(),
             exchange_datetime: self.exchange_datetime.clone().unwrap_or_default(),
@@ -320,6 +311,7 @@ impl SymbolState {
             ask_volume: uint_vec(self.ask_volume),
             market_phase: self.market_phase.unwrap_or_default(),
             tradable_status: self.tradable_status.unwrap_or_default(),
+            serial_num: self.serial_num,
         }
     }
 
@@ -471,7 +463,7 @@ mod tests {
             code: "AAPL".to_string(),
             ..SymbolState::default()
         };
-        assert_eq!(state.to_tick().dest, "V1/TIC/NASDAQ/AAPL");
-        assert_eq!(state.to_bidask().dest, "V1/QUO/NASDAQ/AAPL");
+        assert_eq!(state.to_tick().dest, "IS/V1/TIC/NASDAQ/AAPL");
+        assert_eq!(state.to_bidask().dest, "IS/V1/QUO/NASDAQ/AAPL");
     }
 }

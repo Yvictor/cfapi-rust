@@ -452,6 +452,22 @@ impl CFAPI {
         );
     }
 
+    pub fn set_global_connection_config(&mut self, connection_config: &ConnectionConfig) {
+        self.api.pin_mut().setGlobalConnectionConfig(
+            connection_config.backup,
+            connection_config.compression,
+            connection_config.conflation_indicator,
+            autocxx::c_long(connection_config.conflation_interval),
+            autocxx::c_long(connection_config.read_timeout),
+            autocxx::c_long(connection_config.connection_timeout),
+            autocxx::c_long(connection_config.connection_retry_limit),
+            autocxx::c_long(connection_config.queue_size),
+            autocxx::c_long(connection_config.blocking_connection_time_limit),
+            autocxx::c_long(connection_config.conflation_type),
+            autocxx::c_long(connection_config.jit_conflation_threshold_percent),
+        );
+    }
+
     pub fn set_connection_config(&mut self, host_info: &str, connection_config: &ConnectionConfig) {
         let_cxx_string!(host_info = host_info);
         self.api.pin_mut().setConnectionConfig(
@@ -478,5 +494,9 @@ impl CFAPI {
         let_cxx_string!(src_id = src_id);
         let_cxx_string!(symbol = symbol);
         self.api.pin_mut().sendRequest(&src_id, &symbol, command);
+    }
+
+    pub fn command(&mut self, command: Commands) -> i64 {
+        self.api.pin_mut().sendCommand(command)
     }
 }
