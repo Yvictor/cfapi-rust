@@ -4,7 +4,7 @@ use rsolace::types::{SolClientLogLevel, SolClientReturnCode};
 use serde::Serialize;
 use tracing::{error, info};
 
-use super::{Dest, Formated, FormaterExt, SinkExt};
+use super::{ByteSink, Dest, Formated, FormaterExt, SinkExt};
 
 // #[derive(Debug)]
 #[derive(Serialize)]
@@ -44,7 +44,7 @@ fn load_session_props_from_dotenv() -> SessionProps {
         )
         .compression_level(
             dotenvy::var("SOLACE_COMPRESSION_LEVEL")
-                .unwrap_or_else(|_| "5".to_string())
+                .unwrap_or_else(|_| "1".to_string())
                 .parse::<u32>()
                 .unwrap(),
         )
@@ -70,6 +70,36 @@ impl SolaceSink {
         Self {
             solclient,
             id: id.to_string(),
+        }
+    }
+
+    pub fn send_bytes(
+        &mut self,
+        destination: &str,
+        content_type: &str,
+        payload: &[u8],
+    ) -> SolClientReturnCode {
+        let mut msg = SolMsg::new().unwrap();
+        msg.set_topic(destination);
+        msg.set_user_prop("ct", content_type, 20);
+        msg.set_binary_attachment(payload);
+        self.solclient.send_msg(&msg)
+    }
+}
+
+impl ByteSink for SolaceSink {
+    fn build(id: &str) -> Self {
+        let props = load_session_props_from_dotenv();
+        Self::new(props, id)
+    }
+
+    fn exec_bytes(&mut self, destination: &str, content_type: &str, payload: &[u8]) -> bool {
+        match self.send_bytes(destination, content_type, payload) {
+            SolClientReturnCode::Ok => true,
+            result => {
+                error!("SolaceSink send message error: {:?}", result);
+                false
+            }
         }
     }
 }

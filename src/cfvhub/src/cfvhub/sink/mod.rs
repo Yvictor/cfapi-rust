@@ -36,6 +36,11 @@ pub trait Dest {
     fn get_dest(&self) -> &str;
 }
 
+pub trait ByteSink: 'static {
+    fn build(id: &str) -> Self;
+    fn exec_bytes(&mut self, destination: &str, content_type: &str, payload: &[u8]) -> bool;
+}
+
 pub mod abstain;
 pub mod console;
 pub mod disk;

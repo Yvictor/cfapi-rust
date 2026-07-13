@@ -1,4 +1,4 @@
-use super::{Formated, FormaterExt, SinkExt};
+use super::{ByteSink, Formated, FormaterExt, SinkExt};
 use serde::Serialize;
 use std::io::Write;
 
@@ -32,6 +32,7 @@ impl<In: Serialize> SinkExt<In> for ConsoleSink {
 #[derive(Debug, Default)]
 pub struct SolaceConsoleSink {
     id: String,
+    enabled: bool,
 }
 
 impl<In> SinkExt<In> for SolaceConsoleSink
@@ -39,10 +40,24 @@ where
     In: Serialize + super::Dest + std::fmt::Debug,
 {
     fn build(id: &str) -> Self {
-        Self { id: id.to_string() }
+        let enabled = dotenvy::var("CFVHUB_SINK")
+            .map(|value| {
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "none" | "noop" | "null" | "off" | "0"
+                )
+            })
+            .unwrap_or(true);
+        Self {
+            id: id.to_string(),
+            enabled,
+        }
     }
 
     fn exec(&mut self, input: &In, formater: &impl FormaterExt<In>) {
+        if !self.enabled {
+            return;
+        }
         let topic = input.get_dest();
         let content_type = formater.content_type();
         match formater.format(input) {
@@ -79,6 +94,43 @@ where
                 );
             }
         }
+    }
+}
+
+impl ByteSink for SolaceConsoleSink {
+    fn build(id: &str) -> Self {
+        let enabled = dotenvy::var("CFVHUB_SINK")
+            .map(|value| {
+                !matches!(
+                    value.to_ascii_lowercase().as_str(),
+                    "none" | "noop" | "null" | "off" | "0"
+                )
+            })
+            .unwrap_or(true);
+        Self {
+            id: id.to_string(),
+            enabled,
+        }
+    }
+
+    fn exec_bytes(&mut self, destination: &str, content_type: &str, payload: &[u8]) -> bool {
+        if self.enabled {
+            let preview_len = payload.len().min(32);
+            let preview = payload[..preview_len]
+                .iter()
+                .map(|byte| format!("{:02x}", byte))
+                .collect::<Vec<_>>()
+                .join("");
+            write_console_line(format_args!(
+                "[solace-console:{}] topic={} content_type={} msgpack_len={} msgpack_hex_prefix={}",
+                self.id,
+                destination,
+                content_type,
+                payload.len(),
+                preview
+            ));
+        }
+        true
     }
 }
 

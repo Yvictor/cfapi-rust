@@ -3,6 +3,7 @@ use cfapi::binding::Commands;
 use cfapi::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
 use cfvhub::convertor::nasdaq_solace::NasdaqSolaceConvertorV1;
 use cfvhub::formater::MessagePackFormater;
+use cfvhub::pipe_sharded::PipeShardedMessageHandler;
 use cfvhub::pipe_thread_local::PipeThreadLocalMessageHandler;
 #[cfg(not(feature = "solace"))]
 use cfvhub::sink::SolaceConsoleSink as OutputSink;
@@ -72,6 +73,12 @@ fn cfapi_hosts(default_host: &str) -> Vec<String> {
     hosts.into_iter().collect()
 }
 
+struct SourceSymbolFile {
+    source_id: String,
+    symbol_file: String,
+    symbols: Vec<String>,
+}
+
 fn load_symbols(path: &str, limit: usize) -> Vec<String> {
     let content = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read symbol file {}: {}", path, error));
@@ -92,6 +99,55 @@ fn load_symbols(path: &str, limit: usize) -> Vec<String> {
     symbols
 }
 
+fn load_source_symbol_files(limit_per_source: usize) -> Vec<SourceSymbolFile> {
+    if let Ok(value) = dotenvy::var("CFVHUB_SOURCE_SYMBOL_FILES") {
+        return value
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                let (source_id, symbol_file) = entry.split_once(':').unwrap_or_else(|| {
+                    panic!(
+                        "invalid CFVHUB_SOURCE_SYMBOL_FILES entry {}; expected SOURCE_ID:PATH",
+                        entry
+                    )
+                });
+                let source_id = source_id.trim();
+                let symbol_file = symbol_file.trim();
+                if source_id.is_empty() || symbol_file.is_empty() {
+                    panic!(
+                        "invalid CFVHUB_SOURCE_SYMBOL_FILES entry {}; expected SOURCE_ID:PATH",
+                        entry
+                    );
+                }
+                SourceSymbolFile {
+                    source_id: source_id.to_string(),
+                    symbol_file: symbol_file.to_string(),
+                    symbols: load_symbols(symbol_file, limit_per_source),
+                }
+            })
+            .collect();
+    }
+
+    let Some(symbol_file) = dotenvy::var("CFVHUB_SYMBOL_FILE").ok() else {
+        return Vec::new();
+    };
+    let source_id = dotenvy::var("CFVHUB_SOURCE_ID").unwrap_or_else(|_| "533".to_string());
+    let symbols = load_symbols(&symbol_file, limit_per_source);
+    vec![SourceSymbolFile {
+        source_id,
+        symbol_file,
+        symbols,
+    }]
+}
+
+fn env_usize(name: &str, default: usize) -> usize {
+    dotenvy::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
 fn main() {
     dotenvy::dotenv().ok();
     let args = Args::parse();
@@ -99,11 +155,11 @@ fn main() {
     let cfapi_host = dotenvy::var("CFAPI_HOST").unwrap_or("216.221.209.61:7022".to_string());
     let cfapi_user = dotenvy::var("CFAPI_USER").unwrap_or("SINOCANNED".to_string());
     let cfapi_pass = dotenvy::var("CFAPI_PASS").expect("CFAPI_PASS must be set");
-    let symbol_file = dotenvy::var("CFVHUB_SYMBOL_FILE").ok();
-    let symbols = symbol_file
-        .as_deref()
-        .map(|path| load_symbols(path, 5_000))
-        .unwrap_or_default();
+    let source_symbol_files = load_source_symbol_files(5_000);
+    let total_symbol_count: usize = source_symbol_files
+        .iter()
+        .map(|source_symbols| source_symbols.symbols.len())
+        .sum();
     let source_id = dotenvy::var("CFVHUB_SOURCE_ID").unwrap_or_else(|_| "533".to_string());
     // let reporter =
     //     // minitrace_jaeger::JaegerReporter::new("128.110.5.124:6831".parse().unwrap(), "cfvhub")
@@ -138,7 +194,7 @@ fn main() {
         if source_port_details_mode {
             vec![Box::new(DefaultMessageEventHandler::default())
                 as Box<dyn MessageEventHandlerExt + Send + Sync>]
-        } else {
+        } else if dotenvy::var("CFVHUB_PIPELINE").ok().as_deref() == Some("direct") {
             let pipe_thread_local_message_handler: PipeThreadLocalMessageHandler<
                 NasdaqSolaceConvertorV1,
                 MessagePackFormater,
@@ -147,6 +203,19 @@ fn main() {
             pipe_thread_local_message_handler.exec_metrics_loop_th();
             vec![Box::new(pipe_thread_local_message_handler)
                 as Box<dyn MessageEventHandlerExt + Send + Sync>]
+        } else {
+            let worker_count = env_usize("CFVHUB_WORKERS", 16).max(1);
+            let publisher_count = env_usize("CFVHUB_PUBLISHERS", 4).max(1);
+            let worker_queue_capacity = env_usize("CFVHUB_WORKER_QUEUE_CAPACITY", 65_536).max(1);
+            let publisher_queue_capacity =
+                env_usize("CFVHUB_PUBLISHER_QUEUE_CAPACITY", 262_144).max(1);
+            let handler: PipeShardedMessageHandler<OutputSink> = PipeShardedMessageHandler::new(
+                worker_count,
+                publisher_count,
+                worker_queue_capacity,
+                publisher_queue_capacity,
+            );
+            vec![Box::new(handler) as Box<dyn MessageEventHandlerExt + Send + Sync>]
         };
     let app_name = format!("CFVHUB-{}", args.subscribe_pattern);
     let config = CFAPIConfig::default()
@@ -171,7 +240,7 @@ fn main() {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(args.sink_thread as i64),
         )
-        .with_watchlist(!symbols.is_empty())
+        .with_watchlist(total_symbol_count > 0)
         .with_max_watchlist_size(5_000)
         .with_queue_depth_threshold_percent(5);
     let connection_read_timeout = dotenvy::var("CFAPI_READ_TIMEOUT_SECS")
@@ -228,15 +297,25 @@ fn main() {
         //         Commands::QUERYSNAPANDSUBSCRIBEWILDCARD,
         //     );
         // }
-        if !symbols.is_empty() {
+        if total_symbol_count > 0 {
             info!(
-                source_id = source_id.as_str(),
-                symbol_count = symbols.len(),
-                symbol_file = symbol_file.as_deref().unwrap_or(""),
-                "subscribe symbol file"
+                source_count = source_symbol_files.len(),
+                total_symbol_count, "subscribe source symbol files"
             );
-            for symbol in &symbols {
-                api.request(&source_id, symbol, Commands::QUERYSNAPANDSUBSCRIBE);
+            for source_symbols in &source_symbol_files {
+                info!(
+                    source_id = source_symbols.source_id.as_str(),
+                    symbol_count = source_symbols.symbols.len(),
+                    symbol_file = source_symbols.symbol_file.as_str(),
+                    "subscribe symbol file"
+                );
+                for symbol in &source_symbols.symbols {
+                    api.request(
+                        &source_symbols.source_id,
+                        symbol,
+                        Commands::QUERYSNAPANDSUBSCRIBE,
+                    );
+                }
             }
         } else if dotenvy::var("CFVHUB_WILDCARD").ok().as_deref() == Some("1") {
             api.request(

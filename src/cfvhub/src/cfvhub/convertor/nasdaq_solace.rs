@@ -11,7 +11,7 @@ use crate::sink::Dest;
 const NASDAQ_SOURCES: &[i32] = &[533, 534];
 
 #[derive(Debug, Default, Clone)]
-struct SymbolState {
+pub(crate) struct SymbolState {
     code: String,
     datetime: Option<String>,
     exchange_datetime: Option<String>,
@@ -37,7 +37,7 @@ struct SymbolState {
     market_phase: Option<u8>,
     tradable_status: Option<u8>,
     trade_cond: Option<u64>,
-    serial_num: u64,
+    pub(crate) serial_num: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -165,8 +165,8 @@ impl Convertor for NasdaqSolaceConvertorV1 {
     }
 }
 
-#[derive(Default)]
-struct MessageUpdate {
+#[derive(Debug, Default)]
+pub(crate) struct MessageUpdate {
     is_tick: bool,
     is_bidask: bool,
     datetime: Option<String>,
@@ -192,7 +192,7 @@ struct MessageUpdate {
 }
 
 impl MessageUpdate {
-    fn apply(&mut self, token: i32, value: CFValue) {
+    pub(crate) fn apply(&mut self, token: i32, value: CFValue) {
         match token {
             5 => {}
             8 | 447 => self.close = value_f64(value),
@@ -223,7 +223,14 @@ impl MessageUpdate {
 }
 
 impl SymbolState {
-    fn apply(&mut self, update: &MessageUpdate) {
+    pub(crate) fn new(code: String) -> Self {
+        Self {
+            code,
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn apply(&mut self, update: &MessageUpdate) {
         update_field(&mut self.datetime, update.datetime.clone());
         update_field(
             &mut self.exchange_datetime,
@@ -265,11 +272,11 @@ impl SymbolState {
         }
     }
 
-    fn to_tick(&self) -> NasdaqTick {
+    pub(crate) fn to_tick(&self) -> NasdaqTick {
         let close = self.close.unwrap_or_default();
         let volume = self.volume.unwrap_or_default();
         NasdaqTick {
-            dest: format!("IS/V1/TIC/NASDAQ/{}", self.code),
+            dest: format!("IS/v2/TIC/NASDAQ/{}", self.code),
             code: self.code.clone(),
             datetime: self.datetime.clone().unwrap_or_default(),
             exchange_datetime: self.exchange_datetime.clone().unwrap_or_default(),
@@ -299,9 +306,9 @@ impl SymbolState {
         }
     }
 
-    fn to_bidask(&self) -> NasdaqBidAsk {
+    pub(crate) fn to_bidask(&self) -> NasdaqBidAsk {
         NasdaqBidAsk {
-            dest: format!("IS/V1/QUO/NASDAQ/{}", self.code),
+            dest: format!("IS/v2/QUO/NASDAQ/{}", self.code),
             code: self.code.clone(),
             datetime: self.datetime.clone().unwrap_or_default(),
             exchange_datetime: self.exchange_datetime.clone().unwrap_or_default(),
@@ -326,6 +333,16 @@ impl SymbolState {
         } else {
             0
         }
+    }
+}
+
+impl MessageUpdate {
+    pub(crate) fn is_tick(&self) -> bool {
+        self.is_tick
+    }
+
+    pub(crate) fn is_bidask(&self) -> bool {
+        self.is_bidask
     }
 }
 
@@ -463,7 +480,7 @@ mod tests {
             code: "AAPL".to_string(),
             ..SymbolState::default()
         };
-        assert_eq!(state.to_tick().dest, "IS/V1/TIC/NASDAQ/AAPL");
-        assert_eq!(state.to_bidask().dest, "IS/V1/QUO/NASDAQ/AAPL");
+        assert_eq!(state.to_tick().dest, "IS/v2/TIC/NASDAQ/AAPL");
+        assert_eq!(state.to_bidask().dest, "IS/v2/QUO/NASDAQ/AAPL");
     }
 }
