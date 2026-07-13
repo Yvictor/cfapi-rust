@@ -3,7 +3,7 @@ use cfapi::binding::Commands;
 use cfapi::message_event::{DefaultMessageEventHandler, MessageEventHandlerExt};
 use cfvhub::convertor::nasdaq_solace::NasdaqSolaceConvertorV1;
 use cfvhub::formater::MessagePackFormater;
-use cfvhub::pipe_sharded::PipeShardedMessageHandler;
+use cfvhub::pipe_sharded::{PipeShardedMessageHandler, NASDAQ_FILTER_TOKENS};
 use cfvhub::pipe_thread_local::PipeThreadLocalMessageHandler;
 #[cfg(not(feature = "solace"))]
 use cfvhub::sink::SolaceConsoleSink as OutputSink;
@@ -145,6 +145,17 @@ fn env_usize(name: &str, default: usize) -> usize {
     dotenvy::var(name)
         .ok()
         .and_then(|value| value.parse().ok())
+        .unwrap_or(default)
+}
+
+fn env_enabled(name: &str, default: bool) -> bool {
+    dotenvy::var(name)
+        .map(|value| {
+            !matches!(
+                value.to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
+        })
         .unwrap_or(default)
 }
 
@@ -298,6 +309,16 @@ fn main() {
         //     );
         // }
         if total_symbol_count > 0 {
+            if env_enabled("CFVHUB_TOKEN_FILTER", true) {
+                let source_ids = source_symbol_files
+                    .iter()
+                    .map(|source_symbols| source_symbols.source_id.as_str())
+                    .collect::<std::collections::BTreeSet<_>>();
+                for source_id in source_ids {
+                    let tag = api.select_user_filter_tokens(source_id, NASDAQ_FILTER_TOKENS);
+                    info!(source_id, tag, tokens = ?NASDAQ_FILTER_TOKENS, "sent user token filter");
+                }
+            }
             info!(
                 source_count = source_symbol_files.len(),
                 total_symbol_count, "subscribe source symbol files"

@@ -496,6 +496,19 @@ impl CFAPI {
         self.api.pin_mut().sendRequest(&src_id, &symbol, command);
     }
 
+    pub fn select_user_filter_tokens(&mut self, src_id: &str, tokens: &[i32]) -> i64 {
+        let token_numbers_csv = tokens
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let_cxx_string!(src_id = src_id);
+        let_cxx_string!(token_numbers_csv = token_numbers_csv);
+        self.api
+            .pin_mut()
+            .sendUserFilterTokens(&src_id, &token_numbers_csv)
+    }
+
     pub fn command(&mut self, command: Commands) -> i64 {
         self.api.pin_mut().sendCommand(command)
     }

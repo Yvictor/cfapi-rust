@@ -8,6 +8,7 @@ use ahash::RandomState;
 use cfapi::binding::MessageEvent;
 use cfapi::event_reader::{EventReader, EventReaderSerConfig};
 use cfapi::message_event::MessageEventHandlerExt;
+use cfapi::value::CFValue;
 use kanal::{bounded, Receiver, Sender};
 use tracing::{error, info, warn};
 
@@ -18,6 +19,38 @@ const NASDAQ_SOURCES: &[i32] = &[533, 534];
 const SNAPSHOT_EVENT: i32 = 1;
 const UPDATE_EVENT: i32 = 2;
 const MAX_SYMBOL_BYTES: usize = 32;
+
+pub const NASDAQ_FILTER_TOKENS: &[i32] = &[
+    8, 9, 10, 11, 12, 13, 16, 20, 55, 316, 361, 362, 388, 394, 400, 447, 448, 460, 463, 474, 1021,
+    1708, 1709, 2500, 5004,
+];
+
+fn token_value_is_needed(token: i32) -> bool {
+    matches!(
+        token,
+        8 | 9
+            | 10
+            | 11
+            | 12
+            | 13
+            | 16
+            | 55
+            | 316
+            | 361
+            | 362
+            | 388
+            | 394
+            | 400
+            | 447
+            | 448
+            | 460
+            | 463
+            | 474
+            | 1708
+            | 1709
+            | 2500
+    )
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct SymbolKey {
@@ -240,8 +273,12 @@ where
         };
         let mut update = MessageUpdate::default();
         let mut reader = EventReader::new(event, &self.reader_config);
-        for (token, value) in reader.iter_with_token_number() {
-            update.apply(token, value);
+        while let Some(token) = reader.next_token_number() {
+            if token == 20 || token == 1021 {
+                update.apply(token, CFValue::Unknown);
+            } else if token_value_is_needed(token) {
+                update.apply(token, reader.get_value());
+            }
         }
         if event_type == UPDATE_EVENT && !update.is_tick() && !update.is_bidask() {
             return None;

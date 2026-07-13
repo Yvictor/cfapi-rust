@@ -169,8 +169,8 @@ impl Convertor for NasdaqSolaceConvertorV1 {
 pub(crate) struct MessageUpdate {
     is_tick: bool,
     is_bidask: bool,
-    datetime: Option<String>,
-    exchange_datetime: Option<String>,
+    datetime: Option<CFValue>,
+    exchange_datetime: Option<CFValue>,
     open: Option<f64>,
     avg_price: Option<f64>,
     close: Option<f64>,
@@ -202,8 +202,8 @@ impl MessageUpdate {
             12 => self.bid_price = value_f64(value),
             13 => self.bid_volume = value_u64(value),
             20 => self.is_bidask = true,
-            16 => self.datetime = value_string(value),
-            55 => self.exchange_datetime = value_string(value),
+            16 => self.datetime = Some(value),
+            55 => self.exchange_datetime = Some(value),
             316 => self.chg_type = value_u8(value),
             361 => self.price_chg = value_f64(value),
             362 => self.pct_chg = value_f64(value),
@@ -231,10 +231,13 @@ impl SymbolState {
     }
 
     pub(crate) fn apply(&mut self, update: &MessageUpdate) {
-        update_field(&mut self.datetime, update.datetime.clone());
+        update_field(
+            &mut self.datetime,
+            update.datetime.as_ref().and_then(value_string),
+        );
         update_field(
             &mut self.exchange_datetime,
-            update.exchange_datetime.clone(),
+            update.exchange_datetime.as_ref().and_then(value_string),
         );
         update_field(&mut self.open, update.open);
         update_field(&mut self.avg_price, update.avg_price);
@@ -374,10 +377,10 @@ fn value_u8(value: CFValue) -> Option<u8> {
     value_u64(value).and_then(|value| value.try_into().ok())
 }
 
-fn value_string(value: CFValue) -> Option<String> {
+fn value_string(value: &CFValue) -> Option<String> {
     match value {
-        CFValue::String(value) => Some(value),
-        CFValue::Double(value) | CFValue::Datetime(value) => Some(decimal(Some(value))),
+        CFValue::String(value) => Some(value.clone()),
+        CFValue::Double(value) | CFValue::Datetime(value) => Some(decimal(Some(*value))),
         CFValue::Int(value) => Some(value.to_string()),
         CFValue::Unknown => None,
     }
@@ -453,6 +456,17 @@ mod tests {
         assert_eq!(decimal(Some(12.340000)), "12.34");
         assert_eq!(decimal(Some(12.0)), "12");
         assert_eq!(decimal(None), "");
+    }
+
+    #[test]
+    fn defers_datetime_formatting_until_state_update() {
+        let mut update = MessageUpdate::default();
+        update.apply(16, CFValue::Datetime(1_720_000_000.125));
+        assert!(matches!(update.datetime, Some(CFValue::Datetime(_))));
+
+        let mut state = SymbolState::default();
+        state.apply(&update);
+        assert_eq!(state.datetime.as_deref(), Some("1720000000.125"));
     }
 
     #[test]

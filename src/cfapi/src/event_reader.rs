@@ -127,12 +127,17 @@ impl<'a> EventReader<'a> {
             ValueTypes::UNKNOWN => CFValue::Unknown,
         }
     }
-    pub fn next_with_token_number(&mut self) -> Option<(i32, CFValue)> {
-        if self.reader.as_mut().next() != autocxx::c_int(-1) {
-            Some((self.get_token_number(), self.get_value()))
-        } else {
+    pub fn next_token_number(&mut self) -> Option<i32> {
+        let token = i32::from(self.reader.as_mut().next());
+        if token == -1 {
             None
+        } else {
+            Some(token)
         }
+    }
+    pub fn next_with_token_number(&mut self) -> Option<(i32, CFValue)> {
+        let token = self.next_token_number()?;
+        Some((token, self.get_value()))
     }
 
     pub fn next_with_token_name(&mut self) -> Option<(String, CFValue)> {

@@ -112,6 +112,31 @@ std::int64_t APIFactoryWrap::sendRequest(const std::string &src_id, const std::s
     return (*session).send(req);
 };
 
+std::int64_t APIFactoryWrap::sendUserFilterTokens(const std::string &src_id, const std::string &token_numbers_csv)
+{
+    cfapi::Request &req = (*session).createRequest();
+    req.clearRequest();
+    req.setCommand(cfapi::SELECTUSERFILTERTOKENS);
+    req.add(cfapi::ENUM_SRC_ID, src_id);
+
+    std::size_t start = 0;
+    while (start < token_numbers_csv.size())
+    {
+        const std::size_t end = token_numbers_csv.find(',', start);
+        const std::string token = token_numbers_csv.substr(start, end - start);
+        if (!token.empty())
+        {
+            req.add(cfapi::CTF_TOKEN_NUM, token);
+        }
+        if (end == std::string::npos)
+        {
+            break;
+        }
+        start = end + 1;
+    }
+    return (*session).send(req);
+};
+
 std::int64_t APIFactoryWrap::sendCommand(cfapi::Commands command)
 {
     cfapi::Request &req = (*session).createRequest();

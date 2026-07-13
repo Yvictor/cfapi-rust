@@ -47,6 +47,7 @@ public:
                              long jit_conflation_threshold_percent);
     bool startSession();
     int64_t sendRequest(const std::string &src_id, const std::string &symbol, cfapi::Commands command);
+    int64_t sendUserFilterTokens(const std::string &src_id, const std::string &token_numbers_csv);
     int64_t sendCommand(cfapi::Commands command);
     // void registerMessageEventHandler(cfapi::MessageEventHandler *messageHandler);
     void registerMessageEventHandler(const cfapi::MessageEventHandler &messageHandler);
