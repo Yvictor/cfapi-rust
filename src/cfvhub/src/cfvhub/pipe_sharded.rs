@@ -19,6 +19,12 @@ const NASDAQ_SOURCES: &[i32] = &[533, 534];
 const SNAPSHOT_EVENT: i32 = 1;
 const UPDATE_EVENT: i32 = 2;
 const MAX_SYMBOL_BYTES: usize = 32;
+const CALLBACK_LATENCY_SAMPLE_EVERY: u64 = 64;
+const CALLBACK_LATENCY_UPPER_NS: [u64; 8] =
+    [1_000, 1_500, 2_000, 2_500, 3_000, 4_000, 5_000, 10_000];
+const CALLBACK_LATENCY_LABELS: [&str; 9] = [
+    "<1us", "1-1.5us", "1.5-2us", "2-2.5us", "2.5-3us", "3-4us", "4-5us", "5-10us", ">=10us",
+];
 
 pub const NASDAQ_FILTER_TOKENS: &[i32] = &[
     8, 9, 10, 11, 12, 13, 16, 20, 55, 316, 361, 362, 388, 394, 400, 447, 448, 460, 463, 474, 1021,
@@ -98,6 +104,7 @@ struct PublishFrame {
 struct PipelineMetrics {
     callbacks: AtomicU64,
     callback_nanos: AtomicU64,
+    callback_latency_buckets: [AtomicU64; CALLBACK_LATENCY_LABELS.len()],
     ignored: AtomicU64,
     invalid_symbol: AtomicU64,
     worker_handled: AtomicU64,
@@ -307,11 +314,15 @@ where
             error!(worker, ?error, "state worker queue closed");
             return;
         }
-        self.metrics.callbacks.fetch_add(1, Ordering::Relaxed);
-        self.metrics.callback_nanos.fetch_add(
-            started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64,
-            Ordering::Relaxed,
-        );
+        let elapsed_nanos = started.elapsed().as_nanos().min(u128::from(u64::MAX)) as u64;
+        let callback_index = self.metrics.callbacks.fetch_add(1, Ordering::Relaxed);
+        self.metrics
+            .callback_nanos
+            .fetch_add(elapsed_nanos, Ordering::Relaxed);
+        if callback_index % CALLBACK_LATENCY_SAMPLE_EVERY == 0 {
+            let bucket = CALLBACK_LATENCY_UPPER_NS.partition_point(|upper| elapsed_nanos >= *upper);
+            self.metrics.callback_latency_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+        }
     }
 }
 
@@ -375,6 +386,7 @@ fn spawn_metrics(
         .spawn(move || {
             let mut last_callbacks = 0;
             let mut last_callback_nanos = 0;
+            let mut last_callback_latency_buckets = [0; CALLBACK_LATENCY_LABELS.len()];
             let mut last_published = 0;
             let mut last_worker_counts = vec![0; worker_counts.len()];
             loop {
@@ -389,6 +401,14 @@ fn spawn_metrics(
                 } else {
                     delta_nanos as f64 / delta_callbacks as f64 / 1_000.0
                 };
+                let callback_latency_buckets: [u64; CALLBACK_LATENCY_LABELS.len()] =
+                    std::array::from_fn(|bucket| {
+                        let current =
+                            metrics.callback_latency_buckets[bucket].load(Ordering::Relaxed);
+                        let delta = current.saturating_sub(last_callback_latency_buckets[bucket]);
+                        last_callback_latency_buckets[bucket] = current;
+                        delta
+                    });
                 let worker_queue_sizes = worker_senders.iter().map(Sender::len).collect::<Vec<_>>();
                 let publisher_queue_sizes = publisher_senders
                     .iter()
@@ -407,6 +427,9 @@ fn spawn_metrics(
                 info!(
                     callbacks_per_sec = delta_callbacks as f64 / 10.0,
                     avg_callback_us,
+                    callback_latency_sample_every = CALLBACK_LATENCY_SAMPLE_EVERY,
+                    callback_latency_labels = ?CALLBACK_LATENCY_LABELS,
+                    ?callback_latency_buckets,
                     worker_handled = metrics.worker_handled.load(Ordering::Relaxed),
                     encoded = metrics.encoded.load(Ordering::Relaxed),
                     published_per_sec = published.saturating_sub(last_published) as f64 / 10.0,
