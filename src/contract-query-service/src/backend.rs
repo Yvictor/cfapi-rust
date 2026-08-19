@@ -215,7 +215,7 @@ impl JobCoordinator {
     fn finish_success(
         &self,
         job_id: &str,
-        generation_id: u64,
+        generation_id: Ulid,
         records: usize,
         now: OffsetDateTime,
     ) {
@@ -484,7 +484,7 @@ impl ContractHttpBackend for ContractBackend {
 
 fn lookup_result(
     lookup: ContractLookup,
-    generation_id: u64,
+    generation_id: Ulid,
     policy: FreshnessPolicy,
     now: OffsetDateTime,
 ) -> Result<LookupResult<ContractResponse>, BackendError> {
@@ -544,7 +544,7 @@ fn contract_dto(view: &ContractView) -> Contract {
 fn freshness_dto(
     view: &ContractView,
     decision: FreshnessDecision,
-    generation_id: u64,
+    generation_id: Ulid,
     policy: FreshnessPolicy,
     now: OffsetDateTime,
 ) -> Freshness {
@@ -573,8 +573,6 @@ fn freshness_dto(
                 (state, Some(age))
             });
     Freshness {
-        // Generation IDs are currently u64 cache-local revisions. Keep the HTTP
-        // value opaque until cache generations adopt the ULID contract.
         generation_id: generation_id.to_string(),
         metadata,
         metadata_age_seconds,
