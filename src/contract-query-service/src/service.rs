@@ -70,16 +70,27 @@ pub enum OwnerQuery {
     WholeSource { source_id: u16 },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OwnerSendError {
-    QueueFull,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OwnerExecuteError {
+    Query(QueryError),
+    SendQueueFull { tag: QueryTag },
 }
 
-/// Owns all mutable CFAPI request state. Implementations must not retain request
-/// borrows after `send_prepared` returns.
+impl From<QueryError> for OwnerExecuteError {
+    fn from(error: QueryError) -> Self {
+        Self::Query(error)
+    }
+}
+
+/// Owns all mutable CFAPI request state. `execute` must prepare, invoke `bind`,
+/// and send in that order. A failed bind must drop the prepared request without
+/// sending it, so a `PreparedQueryXref<'_>` never escapes this method call.
 pub trait CfapiCommandOwner: Send + 'static {
-    fn prepare(&mut self, query: &OwnerQuery) -> Result<QueryTag, QueryError>;
-    fn send_prepared(&mut self, query: &OwnerQuery, tag: QueryTag) -> Result<(), OwnerSendError>;
+    fn execute(
+        &mut self,
+        query: &OwnerQuery,
+        bind: &mut dyn FnMut(QueryTag) -> Result<(), QueryError>,
+    ) -> Result<QueryTag, OwnerExecuteError>;
 }
 
 struct Command {
@@ -147,22 +158,47 @@ fn process_command<O: CfapiCommandOwner>(
     registry: &PendingRegistry,
     command: &Command,
 ) -> Result<SendDisposition, QueryError> {
-    let tag = match owner.prepare(&command.query) {
-        Ok(tag) => tag,
-        Err(error) => {
-            registry.cancel(command.request_id);
-            return Err(error);
-        }
+    let mut bound_tag = None;
+    let execution = {
+        let mut bind = |tag| {
+            if bound_tag.is_some() {
+                return Err(QueryError::ProtocolViolation(
+                    "owner invoked the bind hook more than once".to_owned(),
+                ));
+            }
+            registry.bind(command.request_id, tag)?;
+            bound_tag = Some(tag);
+            Ok(())
+        };
+        owner.execute(&command.query, &mut bind)
     };
-    if let Err(error) = registry.bind(command.request_id, tag) {
-        registry.cancel(command.request_id);
-        return Err(error);
-    }
-    match owner.send_prepared(&command.query, tag) {
-        Ok(()) => registry.mark_sent(command.request_id, tag),
-        Err(OwnerSendError::QueueFull) => {
-            registry.rollback_send_queue_full(command.request_id, tag);
-            Err(QueryError::SendQueueFull)
+
+    match execution {
+        Ok(tag) if bound_tag == Some(tag) => registry.mark_sent(command.request_id, tag),
+        Ok(_) => {
+            registry.cancel(command.request_id);
+            Err(QueryError::ProtocolViolation(
+                "owner returned a tag that was not bound".to_owned(),
+            ))
+        }
+        Err(OwnerExecuteError::SendQueueFull { tag }) if bound_tag == Some(tag) => {
+            if registry.rollback_send_queue_full(command.request_id, tag) {
+                Err(QueryError::SendQueueFull)
+            } else {
+                Err(QueryError::ProtocolViolation(
+                    "send queue rollback did not match a live request".to_owned(),
+                ))
+            }
+        }
+        Err(OwnerExecuteError::SendQueueFull { .. }) => {
+            registry.cancel(command.request_id);
+            Err(QueryError::ProtocolViolation(
+                "send queue full tag did not match the bound tag".to_owned(),
+            ))
+        }
+        Err(OwnerExecuteError::Query(error)) => {
+            registry.cancel(command.request_id);
+            Err(error)
         }
     }
 }
