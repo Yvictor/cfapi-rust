@@ -10,6 +10,15 @@ path = "src/lib.rs"
 [features]
 default = []
 cfapi = ["dep:cfapi"]
+runtime = [
+    "cfapi",
+    "salvo/server",
+    "salvo/server-handle",
+    "salvo/http1",
+    "tokio/net",
+    "tokio/rt-multi-thread",
+    "tokio/signal",
+]
 
 [dependencies]
 cfapi = { path = "../cfapi", optional = true }
@@ -27,3 +36,8 @@ ulid = "1.2.1"
 [dev-dependencies]
 salvo = { version = "=0.95.2", default-features = false, features = ["test"] }
 serde_json = "1.0.145"
+
+[[bin]]
+name = "contract-query-service"
+path = "src/bin/contract-query-service.rs"
+required-features = ["runtime"]
