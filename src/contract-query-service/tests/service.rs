@@ -8,7 +8,7 @@ use contract_query_service::{
     query::{CallbackClassification, PendingRegistry, QueryError, QueryTag, RegistryLimits},
     ContractKey, OwnedQueryXrefRow, OwnedToken, OwnedTokenValue,
 };
-use service::{CfapiCommandOwner, ContractService, OwnerQuery, OwnerSendError, ServiceConfig};
+use service::{CfapiCommandOwner, ContractService, OwnerExecuteError, OwnerQuery, ServiceConfig};
 use std::{
     collections::VecDeque,
     num::NonZeroI64,
@@ -26,6 +26,7 @@ enum Action {
     Whole(Vec<OwnedQueryXrefRow>),
     WholeFailure(Vec<OwnedQueryXrefRow>),
     QueueFull,
+    QueueFullWrongTag,
     NoCallback,
 }
 
@@ -33,12 +34,17 @@ struct FakeOwner {
     registry: Arc<PendingRegistry>,
     actions: Arc<Mutex<VecDeque<Action>>>,
     prepares: Arc<AtomicUsize>,
+    sends: Arc<AtomicUsize>,
     next_tag: AtomicI64,
     last_tag: Arc<Mutex<Option<QueryTag>>>,
 }
 
 impl CfapiCommandOwner for FakeOwner {
-    fn prepare(&mut self, query: &OwnerQuery) -> Result<QueryTag, QueryError> {
+    fn execute(
+        &mut self,
+        query: &OwnerQuery,
+        bind: &mut dyn FnMut(QueryTag) -> Result<(), QueryError>,
+    ) -> Result<QueryTag, OwnerExecuteError> {
         match query {
             OwnerQuery::Exact { source_id, symbol } => {
                 assert_eq!(*source_id, 533);
@@ -49,14 +55,13 @@ impl CfapiCommandOwner for FakeOwner {
         self.prepares.fetch_add(1, Ordering::Relaxed);
         let tag = NonZeroI64::new(self.next_tag.fetch_add(1, Ordering::Relaxed)).unwrap();
         *self.last_tag.lock().unwrap() = Some(tag);
-        Ok(tag)
-    }
-
-    fn send_prepared(&mut self, _query: &OwnerQuery, tag: QueryTag) -> Result<(), OwnerSendError> {
-        match self.actions.lock().unwrap().pop_front().unwrap() {
+        let action = self.actions.lock().unwrap().pop_front().unwrap();
+        bind(tag)?;
+        self.sends.fetch_add(1, Ordering::Relaxed);
+        match action {
             Action::Exact(row) => {
                 self.registry.on_image_complete(tag, Some(row));
-                Ok(())
+                Ok(tag)
             }
             Action::DelayedExact(row, delay) => {
                 let registry = Arc::clone(&self.registry);
@@ -64,24 +69,27 @@ impl CfapiCommandOwner for FakeOwner {
                     std::thread::sleep(delay);
                     registry.on_image_complete(tag, Some(row));
                 });
-                Ok(())
+                Ok(tag)
             }
             Action::Whole(rows) => {
                 for row in rows {
                     self.registry.on_image_part(tag, row);
                 }
                 self.registry.on_image_complete(tag, None);
-                Ok(())
+                Ok(tag)
             }
             Action::WholeFailure(rows) => {
                 for row in rows {
                     self.registry.on_image_part(tag, row);
                 }
                 self.registry.on_status(tag, -12, "denied");
-                Ok(())
+                Ok(tag)
             }
-            Action::QueueFull => Err(OwnerSendError::QueueFull),
-            Action::NoCallback => Ok(()),
+            Action::QueueFull => Err(OwnerExecuteError::SendQueueFull { tag }),
+            Action::QueueFullWrongTag => Err(OwnerExecuteError::SendQueueFull {
+                tag: NonZeroI64::new(tag.get() + 100).unwrap(),
+            }),
+            Action::NoCallback => Ok(tag),
         }
     }
 }
@@ -91,6 +99,7 @@ struct Fixture {
     cache: Arc<SourceCache>,
     registry: Arc<PendingRegistry>,
     prepares: Arc<AtomicUsize>,
+    sends: Arc<AtomicUsize>,
     last_tag: Arc<Mutex<Option<QueryTag>>>,
 }
 
@@ -98,11 +107,13 @@ fn fixture(actions: Vec<Action>, timeout: Duration) -> Fixture {
     let cache = Arc::new(SourceCache::new(533, CacheLimits::default()));
     let registry = Arc::new(PendingRegistry::new(RegistryLimits::default()));
     let prepares = Arc::new(AtomicUsize::new(0));
+    let sends = Arc::new(AtomicUsize::new(0));
     let last_tag = Arc::new(Mutex::new(None));
     let owner = FakeOwner {
         registry: Arc::clone(&registry),
         actions: Arc::new(Mutex::new(actions.into())),
         prepares: Arc::clone(&prepares),
+        sends: Arc::clone(&sends),
         next_tag: AtomicI64::new(1),
         last_tag: Arc::clone(&last_tag),
     };
@@ -125,6 +136,7 @@ fn fixture(actions: Vec<Action>, timeout: Duration) -> Fixture {
         cache,
         registry,
         prepares,
+        sends,
         last_tag,
     }
 }
@@ -192,6 +204,36 @@ async fn exact_callback_may_finish_before_send_returns() {
         .unwrap();
 
     assert_eq!(result.contract.metadata.key.symbol, "MSFT");
+    assert_eq!(fixture.registry.pending_count(), 0);
+    assert_eq!(fixture.sends.load(Ordering::Relaxed), 1);
+}
+
+#[tokio::test]
+async fn bind_failure_drops_prepared_request_without_sending() {
+    let fixture = fixture(vec![Action::NoCallback], Duration::from_secs(1));
+    let colliding_tag = NonZeroI64::new(1).unwrap();
+    let existing = fixture.registry.register_exact(999, 533).unwrap();
+    fixture.registry.bind(999, colliding_tag).unwrap();
+    assert!(fixture.registry.cancel(999));
+    drop(existing);
+
+    let error = fixture
+        .service
+        .lookup_exact(
+            533,
+            "IBM",
+            Consistency::FreshRequired,
+            OffsetDateTime::from_unix_timestamp(100).unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        service::ServiceError::Query(QueryError::TagCollision)
+    );
+    assert_eq!(fixture.prepares.load(Ordering::Relaxed), 1);
+    assert_eq!(fixture.sends.load(Ordering::Relaxed), 0);
     assert_eq!(fixture.registry.pending_count(), 0);
 }
 
@@ -283,6 +325,35 @@ async fn send_queue_full_rolls_back_and_late_callback_is_classified() {
     let tag = fixture.last_tag.lock().unwrap().unwrap();
     assert_eq!(
         service::classify_late_callback(&fixture.registry, tag, Some(row("AMD", 100))),
+        CallbackClassification::Late
+    );
+}
+
+#[tokio::test]
+async fn send_queue_full_never_rolls_back_a_different_tag() {
+    let fixture = fixture(vec![Action::QueueFullWrongTag], Duration::from_secs(1));
+
+    let error = fixture
+        .service
+        .lookup_exact(
+            533,
+            "INTC",
+            Consistency::FreshRequired,
+            OffsetDateTime::from_unix_timestamp(100).unwrap(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        service::ServiceError::Query(QueryError::ProtocolViolation(_))
+    ));
+    assert_eq!(fixture.registry.pending_count(), 0);
+    let bound_tag = fixture.last_tag.lock().unwrap().unwrap();
+    assert_eq!(
+        fixture
+            .registry
+            .on_image_complete(bound_tag, Some(row("INTC", 100))),
         CallbackClassification::Late
     );
 }
@@ -389,4 +460,62 @@ fn owner_query_keeps_symbol_out_of_whole_source_requests() {
         symbol: "AAPL".to_owned(),
     };
     assert_eq!(key.symbol, "AAPL");
+}
+
+#[derive(Default)]
+struct MockCfapi {
+    sends: usize,
+}
+
+struct BorrowedPrepared<'a> {
+    cfapi: &'a mut MockCfapi,
+    tag: QueryTag,
+}
+
+impl BorrowedPrepared<'_> {
+    fn send(self) {
+        self.cfapi.sends += 1;
+    }
+}
+
+#[derive(Default)]
+struct BorrowingOwner {
+    cfapi: MockCfapi,
+}
+
+impl CfapiCommandOwner for BorrowingOwner {
+    fn execute(
+        &mut self,
+        _query: &OwnerQuery,
+        bind: &mut dyn FnMut(QueryTag) -> Result<(), QueryError>,
+    ) -> Result<QueryTag, OwnerExecuteError> {
+        let prepared = BorrowedPrepared {
+            cfapi: &mut self.cfapi,
+            tag: NonZeroI64::new(77).unwrap(),
+        };
+        let tag = prepared.tag;
+        bind(tag)?;
+        prepared.send();
+        Ok(tag)
+    }
+}
+
+#[test]
+fn owner_never_stores_prepared_state_across_trait_calls() {
+    let mut owner = BorrowingOwner::default();
+    let mut bound = None;
+    let query = OwnerQuery::Exact {
+        source_id: 533,
+        symbol: "AAPL".to_owned(),
+    };
+
+    let returned = owner
+        .execute(&query, &mut |tag| {
+            bound = Some(tag);
+            Ok(())
+        })
+        .unwrap();
+
+    assert_eq!(bound, Some(returned));
+    assert_eq!(owner.cfapi.sends, 1);
 }
