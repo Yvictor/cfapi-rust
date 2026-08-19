@@ -5,6 +5,7 @@ use contract_query_service::cache::{
 use contract_query_service::{ContractKey, ContractMetadata, ContractView, Mic};
 use std::sync::Arc;
 use time::macros::datetime;
+use ulid::Ulid;
 
 fn contract(source_id: u16, symbol: &str, exchange: &str, name: &str) -> Arc<ContractView> {
     Arc::new(ContractView::from_metadata(ContractMetadata {
@@ -25,6 +26,39 @@ fn contract(source_id: u16, symbol: &str, exchange: &str, name: &str) -> Arc<Con
 
 fn name(row: &ContractView) -> &str {
     row.metadata.name.as_deref().unwrap()
+}
+
+#[test]
+fn generation_identity_is_nil_until_a_successful_commit() {
+    let cache = SourceCache::new(533, CacheLimits::default());
+    assert_eq!(cache.snapshot().id(), Ulid::nil());
+
+    let mut first = cache.begin_sync();
+    first.push(contract(533, "AAPL", "XNAS", "first")).unwrap();
+    let first_id = cache.commit_sync(first).unwrap().id();
+    assert_ne!(first_id, Ulid::nil());
+    assert_eq!(Ulid::from_string(&first_id.to_string()).unwrap(), first_id);
+
+    let mut second = cache.begin_sync();
+    second
+        .push(contract(533, "MSFT", "XNAS", "second"))
+        .unwrap();
+    let second_id = cache.commit_sync(second).unwrap().id();
+    assert_ne!(second_id, first_id);
+}
+
+#[test]
+fn failed_commit_preserves_published_generation_identity() {
+    let cache = SourceCache::new(533, CacheLimits::default());
+    let mut accepted = cache.begin_sync();
+    accepted
+        .push(contract(533, "AAPL", "XNAS", "accepted"))
+        .unwrap();
+    let published_id = cache.commit_sync(accepted).unwrap().id();
+
+    let wrong_source = SourceCache::new(534, CacheLimits::default()).begin_sync();
+    assert!(cache.commit_sync(wrong_source).is_err());
+    assert_eq!(cache.snapshot().id(), published_id);
 }
 
 #[test]

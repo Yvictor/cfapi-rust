@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::mem::size_of;
 use std::sync::Arc;
 use thiserror::Error;
+use ulid::Ulid;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CacheLimits {
@@ -24,7 +25,7 @@ impl Default for CacheLimits {
 
 #[derive(Clone, Debug)]
 pub struct Generation {
-    id: u64,
+    id: Ulid,
     source_id: u16,
     complete: bool,
     rows: HashMap<ContractKey, Arc<ContractView>>,
@@ -34,11 +35,11 @@ pub struct Generation {
 
 impl Generation {
     fn empty(source_id: u16) -> Self {
-        Self::build(0, source_id, false, HashMap::new())
+        Self::build(Ulid::nil(), source_id, false, HashMap::new())
     }
 
     fn build(
-        id: u64,
+        id: Ulid,
         source_id: u16,
         complete: bool,
         rows: HashMap<ContractKey, Arc<ContractView>>,
@@ -70,7 +71,7 @@ impl Generation {
         }
     }
 
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> Ulid {
         self.id
     }
 
@@ -126,7 +127,6 @@ struct OverlayEntry {
 #[derive(Debug)]
 struct MutationState {
     revision: u64,
-    next_generation_id: u64,
     overlays: HashMap<ContractKey, OverlayEntry>,
     negatives: HashMap<ContractKey, u64>,
     exact_inflight: HashSet<ContractKey>,
@@ -147,7 +147,6 @@ impl SourceCache {
             published: RwLock::new(Arc::new(Generation::empty(source_id))),
             mutation: Mutex::new(MutationState {
                 revision: 0,
-                next_generation_id: 1,
                 overlays: HashMap::new(),
                 negatives: HashMap::new(),
                 exact_inflight: HashSet::new(),
@@ -290,17 +289,17 @@ impl SourceCache {
         }
         validate_record_limit(rows.len(), self.limits.max_records)?;
 
-        let generation_id = mutation.next_generation_id;
-        let generation = Arc::new(Generation::build(generation_id, self.source_id, true, rows));
+        let mut generation = Generation::build(Ulid::nil(), self.source_id, true, rows);
         if generation.estimated_bytes > self.limits.max_generation_bytes {
             return Err(CacheError::GenerationByteLimit {
                 limit: self.limits.max_generation_bytes,
                 actual: generation.estimated_bytes,
             });
         }
+        generation.id = Ulid::new();
+        let generation = Arc::new(generation);
 
         *self.published.write() = Arc::clone(&generation);
-        mutation.next_generation_id += 1;
         mutation.overlays.clear();
         mutation
             .negatives

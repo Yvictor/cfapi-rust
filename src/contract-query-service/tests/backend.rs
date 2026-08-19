@@ -24,6 +24,7 @@ use std::{
     time::Duration,
 };
 use time::OffsetDateTime;
+use ulid::Ulid;
 
 enum Action {
     Whole(Vec<OwnedQueryXrefRow>),
@@ -199,7 +200,9 @@ async fn same_symbol_remains_distinct_across_sources() {
     assert_eq!(left_result.body.data.name.as_deref(), Some("left"));
     assert_eq!(right_result.body.data.name.as_deref(), Some("right"));
     assert_ne!(left_result.etag, right_result.etag);
-    assert_eq!(left_result.body.freshness.generation_id, "1");
+    let generation_id = &left_result.body.freshness.generation_id;
+    assert_eq!(generation_id.len(), 26);
+    assert_ne!(Ulid::from_string(generation_id).unwrap(), Ulid::nil());
 }
 
 #[tokio::test]
@@ -284,7 +287,9 @@ async fn sync_job_runs_real_service_and_supports_idempotent_replay() {
     assert_eq!(completed.status, SyncJobStatus::Succeeded);
     assert_eq!(completed.received_records, 2);
     assert_eq!(completed.accepted_records, 2);
-    assert_eq!(completed.generation_id.as_deref(), Some("1"));
+    let generation_id = completed.generation_id.as_deref().unwrap();
+    assert_eq!(generation_id.len(), 26);
+    assert_ne!(Ulid::from_string(generation_id).unwrap(), Ulid::nil());
     assert!(source.cache.get("AAPL").is_some());
 }
 
