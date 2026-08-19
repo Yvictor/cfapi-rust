@@ -1,5 +1,68 @@
 #include "api.h"
 
+namespace
+{
+class RequestGuard
+{
+public:
+    explicit RequestGuard(cfapi::Session &session)
+        : session(session), request(&session.createRequest())
+    {
+    }
+
+    ~RequestGuard()
+    {
+        session.freeRequest(*request);
+    }
+
+    RequestGuard(const RequestGuard &) = delete;
+    RequestGuard &operator=(const RequestGuard &) = delete;
+
+    cfapi::Request &get()
+    {
+        return *request;
+    }
+
+private:
+    cfapi::Session &session;
+    cfapi::Request *request;
+};
+} // namespace
+
+PreparedQueryXrefWrap::PreparedQueryXrefWrap(cfapi::Session &session,
+                                             const std::string &src_id,
+                                             const std::string &symbol,
+                                             bool include_symbol)
+    : session(&session), request(&session.createRequest()), prepared_tag(0)
+{
+    request->clearRequest();
+    request->setCommand(cfapi::QUERYXREF);
+    request->add(cfapi::ENUM_SRC_ID, src_id);
+    if (include_symbol)
+    {
+        request->add(cfapi::SYMBOL_TICKER, symbol);
+    }
+    prepared_tag = request->generateTag();
+}
+
+PreparedQueryXrefWrap::~PreparedQueryXrefWrap()
+{
+    if (request != nullptr)
+    {
+        session->freeRequest(*request);
+    }
+}
+
+std::int64_t PreparedQueryXrefWrap::tag() const
+{
+    return prepared_tag;
+}
+
+std::int64_t PreparedQueryXrefWrap::send()
+{
+    return session->send(*request);
+}
+
 RustMessageEventHandler::RustMessageEventHandler(std::uintptr_t handler_id)
     : handler_id(handler_id)
 {
@@ -103,7 +166,8 @@ void APIFactoryWrap::registerStatisticsEventHandler(const cfapi::StatisticsEvent
 
 std::int64_t APIFactoryWrap::sendRequest(const std::string &src_id, const std::string &symbol, cfapi::Commands command)
 {
-    cfapi::Request &req = (*session).createRequest();
+    RequestGuard request_guard(*session);
+    cfapi::Request &req = request_guard.get();
     req.clearRequest();
     req.add(cfapi::ENUM_SRC_ID, src_id);
     req.add(cfapi::SYMBOL_TICKER, symbol);
@@ -112,9 +176,16 @@ std::int64_t APIFactoryWrap::sendRequest(const std::string &src_id, const std::s
     return (*session).send(req);
 };
 
+std::unique_ptr<PreparedQueryXrefWrap> APIFactoryWrap::prepareQueryXref(
+    const std::string &src_id, const std::string &symbol, bool include_symbol)
+{
+    return std::make_unique<PreparedQueryXrefWrap>(*session, src_id, symbol, include_symbol);
+}
+
 std::int64_t APIFactoryWrap::sendUserFilterTokens(const std::string &src_id, const std::string &token_numbers_csv)
 {
-    cfapi::Request &req = (*session).createRequest();
+    RequestGuard request_guard(*session);
+    cfapi::Request &req = request_guard.get();
     req.clearRequest();
     req.setCommand(cfapi::SELECTUSERFILTERTOKENS);
     req.add(cfapi::ENUM_SRC_ID, src_id);
@@ -139,7 +210,8 @@ std::int64_t APIFactoryWrap::sendUserFilterTokens(const std::string &src_id, con
 
 std::int64_t APIFactoryWrap::sendCommand(cfapi::Commands command)
 {
-    cfapi::Request &req = (*session).createRequest();
+    RequestGuard request_guard(*session);
+    cfapi::Request &req = request_guard.get();
     req.clearRequest();
     req.setCommand(command);
     return (*session).send(req);

@@ -16,6 +16,7 @@ include_cpp! {
     generate!("cfapi::Session")
     // generate!("cfapi::APIFactory")
     generate!("APIFactoryWrap")
+    generate!("PreparedQueryXrefWrap")
     generate!("GetEventReader")
     generate!("GetDate")
     generate!("GetTime")
