@@ -1,4 +1,5 @@
 use salvo::affix_state;
+use salvo::catcher::Catcher;
 use salvo::http::ParseError;
 use salvo::http::{header, HeaderValue, StatusCode};
 use salvo::oapi::{endpoint, OpenApi, ToSchema};
@@ -321,6 +322,68 @@ pub fn router(backend: Arc<dyn ContractHttpBackend>) -> Router {
         .push(Scalar::new("/api-doc/openapi.json").into_router("/doc"))
 }
 
+pub fn service(backend: Arc<dyn ContractHttpBackend>) -> Service {
+    Service::new(router(backend)).catcher(Catcher::default().hoop(api_error_catcher))
+}
+
+#[handler]
+async fn api_error_catcher(
+    req: &mut Request,
+    depot: &mut Depot,
+    res: &mut Response,
+    ctrl: &mut FlowCtrl,
+) {
+    let Some(status) = res.status_code else {
+        ctrl.call_next(req, depot, res).await;
+        return;
+    };
+    if status != StatusCode::NOT_FOUND && status != StatusCode::METHOD_NOT_ALLOWED {
+        ctrl.call_next(req, depot, res).await;
+        return;
+    }
+
+    if status == StatusCode::METHOD_NOT_ALLOWED && !res.headers().contains_key(header::ALLOW) {
+        if let Some(methods) = allowed_methods(req.uri().path()) {
+            res.headers_mut()
+                .insert(header::ALLOW, HeaderValue::from_static(methods));
+        }
+    }
+
+    let request_id = request_id(req);
+    set_request_id(res, &request_id);
+    res.render(Json(ApiError {
+        code: ApiErrorCode::InvalidRequest,
+        message: if status == StatusCode::NOT_FOUND {
+            "route was not found".into()
+        } else {
+            "method is not allowed for this route".into()
+        },
+        request_id,
+        retryable: false,
+        context: ErrorContext::default(),
+    }));
+    ctrl.skip_rest();
+}
+
+fn allowed_methods(path: &str) -> Option<&'static str> {
+    match path {
+        "/v1/contracts/by-source"
+        | "/v1/contracts/by-exchange"
+        | "/health/live"
+        | "/health/ready"
+        | "/api-doc/openapi.json"
+        | "/doc" => Some("GET"),
+        "/v1/contract-sync-jobs" => Some("POST"),
+        path if path
+            .strip_prefix("/v1/contract-sync-jobs/")
+            .is_some_and(|job_id| !job_id.is_empty() && !job_id.contains('/')) =>
+        {
+            Some("GET")
+        }
+        _ => None,
+    }
+}
+
 /// Look up a contract by its canonical CFAPI source key.
 #[endpoint(
     operation_id = "getContractBySource",
@@ -353,7 +416,7 @@ async fn get_contract_by_source(req: &mut Request, depot: &Depot, res: &mut Resp
         Err(error) => return render_error(res, request_id, error),
     };
     match backend.get_by_source(lookup).await {
-        Ok(result) => render_lookup(res, request_id, result),
+        Ok(result) => render_lookup(req, res, request_id, result),
         Err(error) => render_error(res, request_id, error),
     }
 }
@@ -390,7 +453,7 @@ async fn get_contract_by_exchange(req: &mut Request, depot: &Depot, res: &mut Re
         Err(error) => return render_error(res, request_id, error),
     };
     match backend.get_by_exchange(lookup).await {
-        Ok(result) => render_lookup(res, request_id, result),
+        Ok(result) => render_lookup(req, res, request_id, result),
         Err(error) => render_error(res, request_id, error),
     }
 }
@@ -654,6 +717,7 @@ fn set_request_id(res: &mut Response, request_id: &str) {
 }
 
 fn render_lookup<T: Serialize + Send>(
+    req: &Request,
     res: &mut Response,
     request_id: String,
     result: LookupResult<T>,
@@ -669,6 +733,16 @@ fn render_lookup<T: Serialize + Send>(
         header::CACHE_CONTROL,
         HeaderValue::from_static("private, no-cache"),
     );
+    if req
+        .headers()
+        .get_all(header::IF_NONE_MATCH)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .any(|value| value == result.etag)
+    {
+        res.status_code(StatusCode::NOT_MODIFIED);
+        return;
+    }
     res.render(Json(result.body));
 }
 

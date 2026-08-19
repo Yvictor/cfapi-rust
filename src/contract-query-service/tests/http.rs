@@ -124,6 +124,17 @@ async fn source_lookup_decodes_reserved_symbol_and_preserves_request_id() {
             consistency: Consistency::FreshRequired,
         }
     );
+
+    let mut not_modified =
+        TestClient::get("http://localhost/v1/contracts/by-source?source_id=533&symbol=AAPL")
+            .add_header("if-none-match", "\"contract-v1\"", true)
+            .send(router(backend))
+            .await;
+    assert_eq!(not_modified.status_code, Some(StatusCode::NOT_MODIFIED));
+    assert_eq!(not_modified.headers()["etag"], "\"contract-v1\"");
+    assert_eq!(not_modified.headers()["cache-control"], "private, no-cache");
+    assert!(not_modified.headers().contains_key("x-request-id"));
+    assert!(not_modified.take_bytes(None).await.unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -165,6 +176,44 @@ async fn exchange_lookup_normalizes_mic_and_returns_all_matches() {
     assert_eq!(body.matches[0].data.source_id, 533);
     assert_eq!(body.matches[1].data.source_id, 534);
     assert_eq!(backend.exchange_lookups.lock().unwrap()[0].exchange, "XNGS");
+
+    let mut not_modified =
+        TestClient::get("http://localhost/v1/contracts/by-exchange?exchange=XNGS&code=AAPL")
+            .add_header("if-none-match", "\"contract-v1\"", true)
+            .send(router(backend))
+            .await;
+    assert_eq!(not_modified.status_code, Some(StatusCode::NOT_MODIFIED));
+    assert_eq!(not_modified.headers()["etag"], "\"contract-v1\"");
+    assert_eq!(not_modified.headers()["cache-control"], "private, no-cache");
+    assert!(not_modified.headers().contains_key("x-request-id"));
+    assert!(not_modified.take_bytes(None).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn framework_404_and_405_use_api_error_envelope() {
+    let service = service(MockBackend::ready());
+    let mut missing = TestClient::get("http://localhost/not-a-route")
+        .send(&service)
+        .await;
+    assert_eq!(missing.status_code, Some(StatusCode::NOT_FOUND));
+    assert!(missing.headers().contains_key("x-request-id"));
+    let missing_body = missing.take_json::<ApiError>().await.unwrap();
+    assert_eq!(missing_body.code, ApiErrorCode::InvalidRequest);
+    assert_eq!(missing_body.message, "route was not found");
+
+    let mut wrong_method =
+        TestClient::post("http://localhost/v1/contracts/by-source?source_id=533&symbol=AAPL")
+            .send(&service)
+            .await;
+    assert_eq!(
+        wrong_method.status_code,
+        Some(StatusCode::METHOD_NOT_ALLOWED)
+    );
+    assert_eq!(wrong_method.headers()["allow"], "GET");
+    assert!(wrong_method.headers().contains_key("x-request-id"));
+    let method_body = wrong_method.take_json::<ApiError>().await.unwrap();
+    assert_eq!(method_body.code, ApiErrorCode::InvalidRequest);
+    assert_eq!(method_body.message, "method is not allowed for this route");
 }
 
 #[tokio::test]
