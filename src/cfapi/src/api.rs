@@ -1,10 +1,13 @@
 use std::cell::RefCell;
+use std::fmt;
+use std::marker::PhantomData;
+use std::num::NonZeroI64;
 use std::rc::Rc;
 use std::sync::Arc;
 
 use super::binding::{
     APIFactoryWrap, BaseSessionEventHandler, BaseStatisticsEventHandler, BaseUserEventHandler,
-    Commands,
+    Commands, PreparedQueryXrefWrap,
 };
 use super::message_event::{MessageEventDispatcher, MessageEventHandlerExt};
 use super::session_event::SessionEventHandlerExt;
@@ -309,6 +312,87 @@ pub struct CFAPI {
     _statistics_event_handler: Rc<RefCell<BaseStatisticsEventHandler>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrepareQueryXrefError {
+    ZeroTag,
+}
+
+impl fmt::Display for PrepareQueryXrefError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ZeroTag => write!(f, "CFAPI generated an invalid zero query tag"),
+        }
+    }
+}
+
+impl std::error::Error for PrepareQueryXrefError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QueryXrefSendError {
+    SendQueueFull {
+        prepared_tag: NonZeroI64,
+    },
+    TagMismatch {
+        prepared_tag: NonZeroI64,
+        returned_tag: i64,
+    },
+}
+
+impl fmt::Display for QueryXrefSendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SendQueueFull { prepared_tag } => write!(
+                f,
+                "CFAPI request queue is full for prepared tag {prepared_tag}"
+            ),
+            Self::TagMismatch {
+                prepared_tag,
+                returned_tag,
+            } => write!(
+                f,
+                "CFAPI returned tag {returned_tag} for prepared tag {prepared_tag}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for QueryXrefSendError {}
+
+#[must_use = "the request must be registered by tag and then sent"]
+pub struct PreparedQueryXref<'api> {
+    inner: UniquePtr<PreparedQueryXrefWrap>,
+    tag: NonZeroI64,
+    _api: PhantomData<&'api mut CFAPI>,
+    _not_send: PhantomData<Rc<()>>,
+}
+
+impl PreparedQueryXref<'_> {
+    pub fn tag(&self) -> NonZeroI64 {
+        self.tag
+    }
+
+    pub fn send(mut self) -> Result<NonZeroI64, QueryXrefSendError> {
+        let returned_tag = self.inner.pin_mut().send();
+        classify_query_xref_send(self.tag, returned_tag.into())
+    }
+}
+
+fn classify_query_xref_send(
+    prepared_tag: NonZeroI64,
+    returned_tag: i64,
+) -> Result<NonZeroI64, QueryXrefSendError> {
+    if returned_tag == 0 {
+        return Err(QueryXrefSendError::SendQueueFull { prepared_tag });
+    }
+    if returned_tag != prepared_tag.get() {
+        return Err(QueryXrefSendError::TagMismatch {
+            prepared_tag,
+            returned_tag,
+        });
+    }
+    Ok(prepared_tag)
+}
+
 impl CFAPI {
     pub fn new(
         config: CFAPIConfig,
@@ -496,6 +580,32 @@ impl CFAPI {
         self.api.pin_mut().sendRequest(&src_id, &symbol, command);
     }
 
+    /// Prepares a QueryXref request and generates its tag before the request is sent.
+    ///
+    /// The returned handle borrows this CFAPI instance mutably, keeping preparation
+    /// and send on the owner thread. Register `tag()` with the response dispatcher
+    /// before consuming the handle with `send()`.
+    pub fn prepare_query_xref(
+        &mut self,
+        src_id: &str,
+        symbol: Option<&str>,
+    ) -> Result<PreparedQueryXref<'_>, PrepareQueryXrefError> {
+        let include_symbol = symbol.is_some();
+        let_cxx_string!(src_id = src_id);
+        let_cxx_string!(symbol = symbol.unwrap_or_default());
+        let inner = self
+            .api
+            .pin_mut()
+            .prepareQueryXref(&src_id, &symbol, include_symbol);
+        let tag = NonZeroI64::new(inner.tag().into()).ok_or(PrepareQueryXrefError::ZeroTag)?;
+        Ok(PreparedQueryXref {
+            inner,
+            tag,
+            _api: PhantomData,
+            _not_send: PhantomData,
+        })
+    }
+
     pub fn select_user_filter_tokens(&mut self, src_id: &str, tokens: &[i32]) -> i64 {
         let token_numbers_csv = tokens
             .iter()
@@ -511,5 +621,37 @@ impl CFAPI {
 
     pub fn command(&mut self, command: Commands) -> i64 {
         self.api.pin_mut().sendCommand(command)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_the_prepared_tag() {
+        let tag = NonZeroI64::new(42).unwrap();
+        assert_eq!(classify_query_xref_send(tag, 42), Ok(tag));
+    }
+
+    #[test]
+    fn maps_zero_to_send_queue_full() {
+        let tag = NonZeroI64::new(42).unwrap();
+        assert_eq!(
+            classify_query_xref_send(tag, 0),
+            Err(QueryXrefSendError::SendQueueFull { prepared_tag: tag })
+        );
+    }
+
+    #[test]
+    fn rejects_a_mismatched_send_tag() {
+        let tag = NonZeroI64::new(42).unwrap();
+        assert_eq!(
+            classify_query_xref_send(tag, 43),
+            Err(QueryXrefSendError::TagMismatch {
+                prepared_tag: tag,
+                returned_tag: 43,
+            })
+        );
     }
 }

@@ -3,6 +3,7 @@
 #include "cfapi.h"
 #include <cstdint>
 #include <memory>
+#include <string>
 
 class RustMessageEventHandler : public cfapi::MessageEventHandler
 {
@@ -15,6 +16,24 @@ private:
 };
 
 extern "C" void cfapi_rust_on_message_event(std::uintptr_t handler_id, const cfapi::MessageEvent &event);
+
+class PreparedQueryXrefWrap
+{
+public:
+    PreparedQueryXrefWrap(cfapi::Session &session, const std::string &src_id,
+                          const std::string &symbol, bool include_symbol);
+    ~PreparedQueryXrefWrap();
+    PreparedQueryXrefWrap(const PreparedQueryXrefWrap &) = delete;
+    PreparedQueryXrefWrap &operator=(const PreparedQueryXrefWrap &) = delete;
+
+    std::int64_t tag() const;
+    std::int64_t send();
+
+private:
+    cfapi::Session *session;
+    cfapi::Request *request;
+    std::int64_t prepared_tag;
+};
 
 class APIFactoryWrap
 {
@@ -46,6 +65,8 @@ public:
                              long blocking_connection_time_limit, long conflation_type,
                              long jit_conflation_threshold_percent);
     bool startSession();
+    std::unique_ptr<PreparedQueryXrefWrap> prepareQueryXref(
+        const std::string &src_id, const std::string &symbol, bool include_symbol);
     int64_t sendRequest(const std::string &src_id, const std::string &symbol, cfapi::Commands command);
     int64_t sendUserFilterTokens(const std::string &src_id, const std::string &token_numbers_csv);
     int64_t sendCommand(cfapi::Commands command);
