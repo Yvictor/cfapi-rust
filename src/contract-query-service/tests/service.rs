@@ -8,7 +8,10 @@ use contract_query_service::{
     query::{CallbackClassification, PendingRegistry, QueryError, QueryTag, RegistryLimits},
     ContractKey, OwnedQueryXrefRow, OwnedToken, OwnedTokenValue,
 };
-use service::{CfapiCommandOwner, ContractService, OwnerExecuteError, OwnerQuery, ServiceConfig};
+use service::{
+    CfapiCommandBus, CfapiCommandOwner, ContractService, OwnerExecuteError, OwnerQuery,
+    ServiceConfig,
+};
 use std::{
     collections::VecDeque,
     num::NonZeroI64,
@@ -47,10 +50,12 @@ impl CfapiCommandOwner for FakeOwner {
     ) -> Result<QueryTag, OwnerExecuteError> {
         match query {
             OwnerQuery::Exact { source_id, symbol } => {
-                assert_eq!(*source_id, 533);
+                assert!(matches!(*source_id, 533 | 534));
                 assert!(!symbol.is_empty());
             }
-            OwnerQuery::WholeSource { source_id } => assert_eq!(*source_id, 533),
+            OwnerQuery::WholeSource { source_id } => {
+                assert!(matches!(*source_id, 533 | 534));
+            }
         }
         self.prepares.fetch_add(1, Ordering::Relaxed);
         let tag = NonZeroI64::new(self.next_tag.fetch_add(1, Ordering::Relaxed)).unwrap();
@@ -142,8 +147,12 @@ fn fixture(actions: Vec<Action>, timeout: Duration) -> Fixture {
 }
 
 fn row(symbol: &str, observed_at: i64) -> OwnedQueryXrefRow {
+    row_for_source(533, symbol, observed_at)
+}
+
+fn row_for_source(source_id: u16, symbol: &str, observed_at: i64) -> OwnedQueryXrefRow {
     OwnedQueryXrefRow {
-        source_id: 533,
+        source_id,
         symbol: symbol.to_owned(),
         tokens: vec![
             OwnedToken {
@@ -157,6 +166,63 @@ fn row(symbol: &str, observed_at: i64) -> OwnedQueryXrefRow {
         ],
         observed_at: OffsetDateTime::from_unix_timestamp(observed_at).unwrap(),
     }
+}
+
+#[tokio::test]
+async fn two_sources_share_one_command_bus_registry_and_request_sequence() {
+    let registry = Arc::new(PendingRegistry::new(RegistryLimits::default()));
+    let prepares = Arc::new(AtomicUsize::new(0));
+    let sends = Arc::new(AtomicUsize::new(0));
+    let last_tag = Arc::new(Mutex::new(None));
+    let actions = Arc::new(Mutex::new(
+        vec![
+            Action::DelayedExact(row_for_source(533, "AAPL", 100), Duration::from_millis(30)),
+            Action::Exact(row_for_source(534, "MSFT", 100)),
+        ]
+        .into(),
+    ));
+    let owner = FakeOwner {
+        registry: Arc::clone(&registry),
+        actions,
+        prepares: Arc::clone(&prepares),
+        sends: Arc::clone(&sends),
+        next_tag: AtomicI64::new(1),
+        last_tag,
+    };
+    let bus = CfapiCommandBus::start(owner, Arc::clone(&registry), 4);
+    let config = ServiceConfig {
+        freshness: FreshnessPolicy {
+            fresh_for: 10,
+            max_stale_for: 100,
+        },
+        query_timeout: Duration::from_secs(1),
+        negative_ttl: 30,
+        command_capacity: 99,
+    };
+    let cache_533 = Arc::new(SourceCache::new(533, CacheLimits::default()));
+    let cache_534 = Arc::new(SourceCache::new(534, CacheLimits::default()));
+    let service_533 =
+        ContractService::with_command_bus(Arc::clone(&cache_533), bus.clone(), config.clone());
+    let service_534 = ContractService::with_command_bus(Arc::clone(&cache_534), bus, config);
+
+    assert!(Arc::ptr_eq(service_533.registry(), service_534.registry()));
+    assert!(Arc::ptr_eq(service_533.registry(), &registry));
+
+    let now = OffsetDateTime::from_unix_timestamp(100).unwrap();
+    let (left, right) = tokio::join!(
+        service_533.lookup_exact(533, "AAPL", Consistency::FreshRequired, now),
+        service_534.lookup_exact(534, "MSFT", Consistency::FreshRequired, now),
+    );
+
+    assert_eq!(left.unwrap().contract.metadata.key.symbol, "AAPL");
+    assert_eq!(right.unwrap().contract.metadata.key.symbol, "MSFT");
+    assert_eq!(prepares.load(Ordering::Relaxed), 2);
+    assert_eq!(sends.load(Ordering::Relaxed), 2);
+    assert_eq!(registry.pending_count(), 0);
+    assert!(cache_533.get("AAPL").is_some());
+    assert!(cache_533.get("MSFT").is_none());
+    assert!(cache_534.get("MSFT").is_some());
+    assert!(cache_534.get("AAPL").is_none());
 }
 
 fn seed(cache: &SourceCache, value: OwnedQueryXrefRow) {
