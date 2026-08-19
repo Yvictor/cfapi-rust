@@ -56,7 +56,8 @@ DTOs derive `Serialize`, `Deserialize`, and `ToSchema`. Endpoints use `#[endpoin
 | 400 | malformed source, symbol, MIC, or body |
 | 404 | contract not found |
 | 409 | source sync already running |
-| 422 | unsupported source or permission denied |
+| 403 | upstream permission denied |
+| 422 | unsupported source |
 | 502 | upstream CFAPI status or protocol violation |
 | 503 | not ready, disconnected, shutting down, or local backpressure |
 | 504 | upstream query timeout |
@@ -88,4 +89,3 @@ Reject or replace: HTTP 200 application errors, HTTP 200 unhealthy responses, st
 ## Required Tests
 
 Use `salvo::test::TestClient` with fake query and sync modules. Cover every error status/code/body, success/not-found/timeout/disconnect/backpressure, readiness transitions, malformed and oversized input, request-ID preservation and generation, OpenAPI snapshots including error responses, cancellation cleanup after timeout, and graceful shutdown behavior.
-
