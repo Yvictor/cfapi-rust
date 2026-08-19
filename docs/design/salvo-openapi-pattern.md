@@ -6,7 +6,7 @@ Status: decision for issue #8
 
 Create an independent workspace binary crate at `src/contract-query-service`. Reuse `cfapi` through an application/service seam; do not add HTTP behavior to cfvhub.
 
-Use Salvo 0.89 with `oapi`, `affix-state`, `logging`, `request-id`, `catch-panic`, and `size-limiter`. Salvo 0.89 requires Rust 1.89; verify the deployment toolchain before implementation. The crate may remain edition 2021.
+Use the verified Salvo 0.95.2 release with `oapi`, `affix-state`, `logging`, `request-id`, `catch-panic`, and `size-limiter`. Its MSRV is Rust 1.94, and the `api_dev` implementation and test environment runs Rust 1.95. The crate may remain edition 2021.
 
 ## Layout
 
