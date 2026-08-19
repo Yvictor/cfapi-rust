@@ -11,7 +11,7 @@ use crate::{
         JobError, LookupResult, SourceLookup, SyncJob, SyncJobStatus, TickSizeRule,
     },
     query::QueryError,
-    service::{ContractLookup, ContractService, ServiceError},
+    service::{ContractLookup, ContractService, ServiceError, SyncOutcome},
 };
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -212,20 +212,15 @@ impl JobCoordinator {
         }
     }
 
-    fn finish_success(
-        &self,
-        job_id: &str,
-        generation_id: Ulid,
-        records: usize,
-        now: OffsetDateTime,
-    ) {
+    fn finish_success(&self, job_id: &str, outcome: SyncOutcome, now: OffsetDateTime) {
         let mut state = self.state.lock();
         let source_id = if let Some(job) = state.jobs.get_mut(job_id) {
             job.status = SyncJobStatus::Succeeded;
             job.completed_at = Some(format_timestamp(now));
-            job.received_records = records as u64;
-            job.accepted_records = records as u64;
-            job.generation_id = Some(generation_id.to_string());
+            job.received_records = outcome.received_records;
+            job.accepted_records = outcome.accepted_records;
+            job.rejected_records = outcome.rejected_records;
+            job.generation_id = Some(outcome.generation.id().to_string());
             Some(job.source_id)
         } else {
             None
@@ -456,12 +451,7 @@ impl ContractHttpBackend for ContractBackend {
         tokio::spawn(async move {
             jobs.mark_running(&job_id, OffsetDateTime::now_utc());
             match service.sync_source(request.source_id).await {
-                Ok(generation) => jobs.finish_success(
-                    &job_id,
-                    generation.id(),
-                    generation.len(),
-                    OffsetDateTime::now_utc(),
-                ),
+                Ok(outcome) => jobs.finish_success(&job_id, outcome, OffsetDateTime::now_utc()),
                 Err(error) => jobs.finish_error(
                     &job_id,
                     map_service_error(error, Some(request.source_id), None),

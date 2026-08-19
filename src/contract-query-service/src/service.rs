@@ -1,7 +1,7 @@
 use contract_query_service::{
     cache::{
-        decide_freshness, Consistency, FreshnessDecision, FreshnessPolicy, RefreshFailure,
-        SourceCache,
+        decide_freshness, Consistency, FreshnessDecision, FreshnessPolicy, Generation,
+        RefreshFailure, SourceCache,
     },
     convert_query_xref_row,
     query::{
@@ -48,6 +48,14 @@ impl Default for ServiceConfig {
 pub struct ContractLookup {
     pub contract: Arc<ContractView>,
     pub freshness: FreshnessDecision,
+}
+
+#[derive(Clone, Debug)]
+pub struct SyncOutcome {
+    pub generation: Arc<Generation>,
+    pub received_records: u64,
+    pub accepted_records: u64,
+    pub rejected_records: u64,
 }
 
 #[derive(Clone, Debug, Eq, Error, PartialEq)]
@@ -400,10 +408,7 @@ impl ContractService {
         }
     }
 
-    pub async fn sync_source(
-        &self,
-        source_id: u16,
-    ) -> Result<Arc<contract_query_service::cache::Generation>, ServiceError> {
+    pub async fn sync_source(&self, source_id: u16) -> Result<SyncOutcome, ServiceError> {
         self.ensure_source(source_id)?;
         let request_id = self.next_id();
         let query = self
@@ -429,16 +434,39 @@ impl ContractService {
         let rows = rows?;
 
         let mut staging = self.cache.begin_sync();
+        let mut received_records = 0_u64;
+        let mut accepted_records = 0_u64;
+        let mut rejected_records = 0_u64;
         for row in rows {
-            let parsed = convert_query_xref_row(row, None)
-                .map_err(|error| ServiceError::InvalidRow(error.to_string()))?;
+            received_records += 1;
+            if row.source_id != source_id {
+                return Err(ServiceError::Staging(format!(
+                    "contract belongs to source {}, expected {source_id}",
+                    row.source_id
+                )));
+            }
+            let parsed = match convert_query_xref_row(row, None) {
+                Ok(parsed) => parsed,
+                Err(_) => {
+                    rejected_records += 1;
+                    continue;
+                }
+            };
             staging
                 .push(Arc::new(parsed.contract))
                 .map_err(|error| ServiceError::Staging(error.to_string()))?;
+            accepted_records += 1;
         }
-        self.cache
+        let generation = self
+            .cache
             .commit_sync(staging)
-            .map_err(|error| ServiceError::Cache(error.to_string()))
+            .map_err(|error| ServiceError::Cache(error.to_string()))?;
+        Ok(SyncOutcome {
+            generation,
+            received_records,
+            accepted_records,
+            rejected_records,
+        })
     }
 
     fn ensure_source(&self, source_id: u16) -> Result<(), ServiceError> {
