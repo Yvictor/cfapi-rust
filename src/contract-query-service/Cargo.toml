@@ -11,10 +11,14 @@ path = "src/lib.rs"
 parking_lot = "0.12.5"
 rmp-serde = "1.3.1"
 rust_decimal = "1.42.0"
+salvo = { version = "=0.95.2", default-features = false, features = ["oapi", "affix-state", "logging"] }
+salvo-oapi = { version = "=0.95.2", features = ["scalar"] }
 serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
 thiserror = "1.0.69"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
 tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
+ulid = "1.2.1"
 
 [dev-dependencies]
-serde_json = "1.0.145"
+salvo = { version = "=0.95.2", default-features = false, features = ["test"] }
