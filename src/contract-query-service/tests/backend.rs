@@ -294,6 +294,34 @@ async fn sync_job_runs_real_service_and_supports_idempotent_replay() {
 }
 
 #[tokio::test]
+async fn sync_job_reports_precise_received_accepted_and_rejected_counts() {
+    let source = source_fixture(533, Duration::from_millis(100));
+    let mut partial = row(533, "MSFT", "XNAS", "Microsoft");
+    partial.tokens.push(OwnedToken {
+        number: 435,
+        value: OwnedTokenValue::String("INVALID".to_owned()),
+    });
+    source.actions.lock().unwrap().push_back(Action::Whole(vec![
+        row(533, "AAPL", "XNAS", "Apple"),
+        row(533, "", "XNAS", "Invalid"),
+        partial,
+    ]));
+    let backend = backend(&[&source], 8);
+
+    let created = backend
+        .create_sync_job(CreateSyncJobRequest { source_id: 533 }, None)
+        .await
+        .unwrap();
+    let completed = wait_for_terminal(&backend, &created.job.job_id).await;
+
+    assert_eq!(completed.status, SyncJobStatus::Succeeded);
+    assert_eq!(completed.received_records, 3);
+    assert_eq!(completed.accepted_records, 2);
+    assert_eq!(completed.rejected_records, 1);
+    assert_eq!(source.cache.snapshot().len(), 2);
+}
+
+#[tokio::test]
 async fn concurrent_idempotent_creates_return_one_job() {
     let source = source_fixture(533, Duration::from_millis(100));
     let backend = Arc::new(backend(&[&source], 8));

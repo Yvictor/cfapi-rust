@@ -109,7 +109,15 @@ struct Fixture {
 }
 
 fn fixture(actions: Vec<Action>, timeout: Duration) -> Fixture {
-    let cache = Arc::new(SourceCache::new(533, CacheLimits::default()));
+    fixture_with_limits(actions, timeout, CacheLimits::default())
+}
+
+fn fixture_with_limits(
+    actions: Vec<Action>,
+    timeout: Duration,
+    cache_limits: CacheLimits,
+) -> Fixture {
+    let cache = Arc::new(SourceCache::new(533, cache_limits));
     let registry = Arc::new(PendingRegistry::new(RegistryLimits::default()));
     let prepares = Arc::new(AtomicUsize::new(0));
     let sends = Arc::new(AtomicUsize::new(0));
@@ -476,13 +484,93 @@ async fn whole_source_commits_only_after_complete() {
         Duration::from_secs(1),
     );
 
-    let generation = fixture.service.sync_source(533).await.unwrap();
+    let outcome = fixture.service.sync_source(533).await.unwrap();
 
-    assert!(generation.is_complete());
+    assert!(outcome.generation.is_complete());
     assert_eq!(fixture.service.registry().pending_count(), 0);
-    assert_eq!(generation.len(), 2);
+    assert_eq!(outcome.generation.len(), 2);
+    assert_eq!(outcome.received_records, 2);
+    assert_eq!(outcome.accepted_records, 2);
+    assert_eq!(outcome.rejected_records, 0);
     assert!(fixture.cache.get("AAPL").is_some());
     assert!(fixture.cache.get("MSFT").is_some());
+}
+
+#[tokio::test]
+async fn whole_source_rejects_bad_rows_and_accepts_validation_issues() {
+    let mut partial = row("MSFT", 100);
+    partial.tokens.push(OwnedToken {
+        number: 435,
+        value: OwnedTokenValue::String("INVALID".to_owned()),
+    });
+    let fixture = fixture(
+        vec![Action::Whole(vec![row("AAPL", 100), row("", 100), partial])],
+        Duration::from_secs(1),
+    );
+
+    let outcome = fixture.service.sync_source(533).await.unwrap();
+
+    assert_eq!(outcome.received_records, 3);
+    assert_eq!(outcome.accepted_records, 2);
+    assert_eq!(outcome.rejected_records, 1);
+    assert_eq!(outcome.generation.len(), 2);
+    assert!(fixture.cache.get("AAPL").is_some());
+    assert!(fixture.cache.get("MSFT").is_some());
+}
+
+#[tokio::test]
+async fn staging_limit_is_fatal_and_preserves_the_previous_generation() {
+    let fixture = fixture_with_limits(
+        vec![Action::Whole(vec![row("AAPL", 100), row("MSFT", 100)])],
+        Duration::from_secs(1),
+        CacheLimits {
+            max_records: 1,
+            ..CacheLimits::default()
+        },
+    );
+    let before = fixture.cache.snapshot();
+
+    let error = fixture.service.sync_source(533).await.unwrap_err();
+
+    assert!(matches!(error, service::ServiceError::Staging(_)));
+    let after = fixture.cache.snapshot();
+    assert_eq!(after.id(), before.id());
+    assert!(!after.is_complete());
+    assert!(fixture.cache.get("AAPL").is_none());
+}
+
+#[tokio::test]
+async fn staging_byte_limit_is_fatal() {
+    let fixture = fixture_with_limits(
+        vec![Action::Whole(vec![row("AAPL", 100)])],
+        Duration::from_secs(1),
+        CacheLimits {
+            max_generation_bytes: 1,
+            ..CacheLimits::default()
+        },
+    );
+
+    let error = fixture.service.sync_source(533).await.unwrap_err();
+
+    assert!(matches!(error, service::ServiceError::Staging(_)));
+    assert!(!fixture.cache.snapshot().is_complete());
+}
+
+#[tokio::test]
+async fn wrong_source_row_is_fatal_instead_of_rejected() {
+    let fixture = fixture(
+        vec![Action::Whole(vec![
+            row("AAPL", 100),
+            row_for_source(534, "MSFT", 100),
+        ])],
+        Duration::from_secs(1),
+    );
+
+    let error = fixture.service.sync_source(533).await.unwrap_err();
+
+    assert!(matches!(error, service::ServiceError::Staging(_)));
+    assert!(!fixture.cache.snapshot().is_complete());
+    assert!(fixture.cache.get("AAPL").is_none());
 }
 
 #[tokio::test]
