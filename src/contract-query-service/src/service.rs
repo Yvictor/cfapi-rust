@@ -99,14 +99,19 @@ struct Command {
     reply: oneshot::Sender<Result<SendDisposition, QueryError>>,
 }
 
+/// Cloneable client for the single thread that owns mutable CFAPI request state.
+///
+/// All services sharing this bus also share its pending registry and request ID
+/// sequence. Per-source cache and singleflight state remain in `ContractService`.
 #[derive(Clone)]
-struct CommandHandle {
+pub struct CfapiCommandBus {
     sender: mpsc::Sender<Command>,
     registry: Arc<PendingRegistry>,
+    next_request_id: Arc<AtomicU64>,
 }
 
-impl CommandHandle {
-    fn start<O>(mut owner: O, registry: Arc<PendingRegistry>, capacity: usize) -> Self
+impl CfapiCommandBus {
+    pub fn start<O>(mut owner: O, registry: Arc<PendingRegistry>, capacity: usize) -> Self
     where
         O: CfapiCommandOwner,
     {
@@ -122,7 +127,19 @@ impl CommandHandle {
                 }
             })
             .expect("failed to start CFAPI contract command owner");
-        Self { sender, registry }
+        Self {
+            sender,
+            registry,
+            next_request_id: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
+    pub fn registry(&self) -> &Arc<PendingRegistry> {
+        &self.registry
+    }
+
+    fn next_request_id(&self) -> RequestId {
+        self.next_request_id.fetch_add(1, Ordering::Relaxed)
     }
 
     async fn submit(
@@ -291,10 +308,8 @@ impl Drop for PendingRequestGuard<'_> {
 
 pub struct ContractService {
     cache: Arc<SourceCache>,
-    registry: Arc<PendingRegistry>,
-    commands: CommandHandle,
+    command_bus: CfapiCommandBus,
     config: ServiceConfig,
-    next_request_id: AtomicU64,
     flights: Mutex<HashMap<ContractKey, Arc<ExactFlight>>>,
 }
 
@@ -308,19 +323,25 @@ impl ContractService {
     where
         O: CfapiCommandOwner,
     {
-        let commands = CommandHandle::start(owner, Arc::clone(&registry), config.command_capacity);
+        let command_bus = CfapiCommandBus::start(owner, registry, config.command_capacity);
+        Self::with_command_bus(cache, command_bus, config)
+    }
+
+    pub fn with_command_bus(
+        cache: Arc<SourceCache>,
+        command_bus: CfapiCommandBus,
+        config: ServiceConfig,
+    ) -> Self {
         Self {
             cache,
-            registry,
-            commands,
+            command_bus,
             config,
-            next_request_id: AtomicU64::new(1),
             flights: Mutex::new(HashMap::new()),
         }
     }
 
     pub fn registry(&self) -> &Arc<PendingRegistry> {
-        &self.registry
+        self.command_bus.registry()
     }
 
     pub async fn lookup_exact(
@@ -385,19 +406,21 @@ impl ContractService {
     ) -> Result<Arc<contract_query_service::cache::Generation>, ServiceError> {
         self.ensure_source(source_id)?;
         let request_id = self.next_id();
-        let query = self.registry.register_whole_source(request_id, source_id)?;
-        let mut pending_guard = PendingRequestGuard::new(&self.registry, request_id);
+        let query = self
+            .registry()
+            .register_whole_source(request_id, source_id)?;
+        let mut pending_guard = PendingRequestGuard::new(self.registry(), request_id);
         let command = OwnerQuery::WholeSource { source_id };
         let operation = async {
             let (sent, rows) =
-                tokio::join!(self.commands.submit(request_id, command), query.drain());
+                tokio::join!(self.command_bus.submit(request_id, command), query.drain());
             sent?;
             rows
         };
         let rows = match tokio::time::timeout(self.config.query_timeout, operation).await {
             Ok(result) => result,
             Err(_) => {
-                self.registry.timeout(request_id);
+                self.registry().timeout(request_id);
                 pending_guard.disarm();
                 return Err(ServiceError::Query(QueryError::Timeout));
             }
@@ -444,20 +467,20 @@ impl ContractService {
 
     async fn refresh_exact(&self, key: &ContractKey, now_epoch: u64) -> Result<(), ServiceError> {
         let request_id = self.next_id();
-        let query = self.registry.register_exact(request_id, key.source_id)?;
-        let mut pending_guard = PendingRequestGuard::new(&self.registry, request_id);
+        let query = self.registry().register_exact(request_id, key.source_id)?;
+        let mut pending_guard = PendingRequestGuard::new(self.registry(), request_id);
         let command = OwnerQuery::Exact {
             source_id: key.source_id,
             symbol: key.symbol.clone(),
         };
         let operation = async {
-            self.commands.submit(request_id, command).await?;
+            self.command_bus.submit(request_id, command).await?;
             query.receive().await
         };
         let row = match tokio::time::timeout(self.config.query_timeout, operation).await {
             Ok(result) => result,
             Err(_) => {
-                self.registry.timeout(request_id);
+                self.registry().timeout(request_id);
                 pending_guard.disarm();
                 return Err(ServiceError::Query(QueryError::Timeout));
             }
@@ -511,7 +534,7 @@ impl ContractService {
     }
 
     fn next_id(&self) -> RequestId {
-        self.next_request_id.fetch_add(1, Ordering::Relaxed)
+        self.command_bus.next_request_id()
     }
 }
 
