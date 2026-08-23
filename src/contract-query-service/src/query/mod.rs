@@ -396,6 +396,16 @@ impl PendingRegistry {
         self.terminal_by_request(request_id, None, QueryError::Timeout)
     }
 
+    pub fn source_for_active_tag(&self, tag: QueryTag) -> Result<u16, CallbackClassification> {
+        let mut state = self.state.lock();
+        self.prune_tombstones(&mut state, Instant::now());
+        state
+            .by_tag
+            .get(&tag)
+            .map(|entry| entry.source_id)
+            .ok_or_else(|| self.classify_locked(&state, tag))
+    }
+
     pub fn on_image_part(&self, tag: QueryTag, row: OwnedQueryXrefRow) -> CallbackClassification {
         let entry = match self.lookup_part(tag) {
             Ok(entry) => entry,

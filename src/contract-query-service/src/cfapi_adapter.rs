@@ -195,17 +195,23 @@ impl QueryXrefEventBridge {
             return CallbackClassification::Unknown;
         };
         match event.getType() as MessageEvent_Types {
-            MessageEvent_Types::IMAGE_PART => match owned_row_from_event(event) {
-                Ok(Some(row)) => self.registry.on_image_part(tag, row),
-                Ok(None) | Err(_) => self
-                    .registry
-                    .on_unexpected_event(tag, "invalid QueryXref IMAGE_PART"),
+            MessageEvent_Types::IMAGE_PART => match self.registry.source_for_active_tag(tag) {
+                Ok(source_id) => match owned_row_from_event(event, source_id) {
+                    Ok(Some(row)) => self.registry.on_image_part(tag, row),
+                    Ok(None) | Err(_) => self
+                        .registry
+                        .on_unexpected_event(tag, "invalid QueryXref IMAGE_PART"),
+                },
+                Err(classification) => classification,
             },
-            MessageEvent_Types::IMAGE_COMPLETE => match owned_row_from_event(event) {
-                Ok(row) => self.registry.on_image_complete(tag, row),
-                Err(_) => self
-                    .registry
-                    .on_unexpected_event(tag, "invalid QueryXref IMAGE_COMPLETE"),
+            MessageEvent_Types::IMAGE_COMPLETE => match self.registry.source_for_active_tag(tag) {
+                Ok(source_id) => match owned_row_from_event(event, source_id) {
+                    Ok(row) => self.registry.on_image_complete(tag, row),
+                    Err(_) => self
+                        .registry
+                        .on_unexpected_event(tag, "invalid QueryXref IMAGE_COMPLETE"),
+                },
+                Err(classification) => classification,
             },
             MessageEvent_Types::STATUS => self.registry.on_status(
                 tag,
@@ -277,12 +283,13 @@ pub fn build_owned_query_xref_row(
 
 fn owned_row_from_event(
     event: &MessageEvent,
+    source_id: u16,
 ) -> Result<Option<OwnedQueryXrefRow>, EventConversionError> {
     let config = EventReaderSerConfig::default();
     let mut reader = EventReader::new(event, &config);
     let values = std::iter::from_fn(|| reader.next_with_token_number());
     build_owned_query_xref_row(
-        i32::from(event.getSource()),
+        i32::from(source_id),
         event.getSymbol().to_string(),
         values,
         OffsetDateTime::now_utc(),

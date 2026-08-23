@@ -212,6 +212,34 @@ async fn tombstones_classify_duplicates_late_and_unknown_and_quarantine_tags() {
 }
 
 #[tokio::test]
+async fn active_tag_source_is_authoritative_without_changing_missing_classification() {
+    let registry = PendingRegistry::new(limits());
+    let completed = registry.register_exact(1, 533).unwrap();
+    registry.bind(1, tag(11)).unwrap();
+    assert_eq!(registry.source_for_active_tag(tag(11)), Ok(533));
+    registry.on_image_complete(tag(11), Some(row(533, "AAPL")));
+    completed.receive().await.unwrap();
+    assert_eq!(
+        registry.source_for_active_tag(tag(11)),
+        Err(CallbackClassification::Duplicate)
+    );
+
+    let late = registry.register_exact(2, 534).unwrap();
+    registry.bind(2, tag(12)).unwrap();
+    assert_eq!(registry.source_for_active_tag(tag(12)), Ok(534));
+    registry.timeout(2);
+    assert_eq!(late.receive().await, Err(QueryError::Timeout));
+    assert_eq!(
+        registry.source_for_active_tag(tag(12)),
+        Err(CallbackClassification::Late)
+    );
+    assert_eq!(
+        registry.source_for_active_tag(tag(99)),
+        Err(CallbackClassification::Unknown)
+    );
+}
+
+#[tokio::test]
 async fn whole_source_queue_overflow_never_blocks_callback() {
     let mut configured = limits();
     configured.item_queue_capacity = 1;

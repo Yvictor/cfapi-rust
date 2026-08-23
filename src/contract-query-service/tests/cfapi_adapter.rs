@@ -9,10 +9,10 @@ use cfapi_adapter::{
     build_owned_query_xref_row, owned_token_from_cf_value, CfapiAdapter, EventConversionError,
     QueryXrefEventBridge,
 };
-use contract_query_service::query::QueryError;
+use contract_query_service::query::{PendingRegistry, QueryError, RegistryLimits};
 use contract_query_service::OwnedTokenValue;
 use rust_decimal::Decimal;
-use std::str::FromStr;
+use std::{num::NonZeroI64, str::FromStr};
 use time::macros::datetime;
 
 fn assert_send<T: Send>() {}
@@ -88,6 +88,29 @@ fn builds_an_owned_row_without_borrowing_callback_memory() {
     assert_eq!(row.symbol, "AAPL");
     assert_eq!(row.observed_at, observed_at);
     assert_eq!(row.tokens.len(), 2);
+}
+
+#[test]
+fn registered_source_replaces_zero_event_source_at_callback_boundary() {
+    let registry = PendingRegistry::new(RegistryLimits::default());
+    let tag = NonZeroI64::new(11).unwrap();
+    let _query = registry.register_whole_source(1, 533).unwrap();
+    registry.bind(1, tag).unwrap();
+
+    let event_source = 0;
+    let authoritative_source = registry.source_for_active_tag(tag).unwrap();
+    let row = build_owned_query_xref_row(
+        i32::from(authoritative_source),
+        "AAPL".to_owned(),
+        [(5, CFValue::String("AAPL".to_owned()))],
+        datetime!(2026-08-19 10:00 UTC),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(event_source, 0);
+    assert_eq!(authoritative_source, 533);
+    assert_eq!(row.source_id, 533);
 }
 
 #[test]
