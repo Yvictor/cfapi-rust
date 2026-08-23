@@ -103,9 +103,9 @@ curl -sS --get "$BASE/v1/contracts/by-exchange" \
 
 ## Synchronization And Recovery
 
-With `CONTRACT_AUTO_SYNC=true`, each configured source runs one whole-source sync after every
-configured source is reported available. A failed startup sync leaves that cache incomplete and is
-not retried by the startup task. Start a manual recovery job for each affected source:
+With `CONTRACT_AUTO_SYNC=true`, each configured source runs one whole-source sync after the
+transport session reports `SESSION_ESTABLISHED`. A failed startup sync leaves that cache
+incomplete and is not retried by the startup task. Start a manual recovery job for each affected source:
 
 ```bash
 curl -i -X POST "$BASE/v1/contract-sync-jobs" \
@@ -124,8 +124,9 @@ Repeat for source 534, or every source in `CFAPI_SOURCES`. A successful sync ato
 complete generation. Cache readiness becomes ready only after every configured source cache is
 complete; failed syncs do not mark it ready.
 
-The CFAPI session is not ready until every configured source reports `AVAILABLE`. Recovery or
-unavailability immediately clears session readiness and fails pending requests. Overall readiness
+The CFAPI session becomes ready and opens the query gate when the transport reports
+`SESSION_ESTABLISHED`; later `AVAILABLE` events keep it ready. `RECOVERY` or `UNAVAILABLE` closes
+the gate, clears session readiness, and fails pending requests. Overall readiness
 returns HTTP 503 until the session, every configured cache, query coordinator, and sync coordinator
 are all ready. Liveness remains HTTP 200 while the HTTP process runs.
 
