@@ -29,6 +29,7 @@ An explicitly present but empty primary variable is invalid and does not fall ba
 | Variable | Default | Meaning |
 | --- | ---: | --- |
 | `CONTRACT_HTTP_BIND` | `0.0.0.0:8080` | HTTP listen address |
+| `RUST_LOG` | `warn,contract_query_service=info` | Tracing filter; invalid values fall back to this default |
 | `CFAPI_SOURCES` | `533,534` | Source IDs; duplicates are removed |
 | `CFAPI_MAX_USER_THREADS` | `0` | Maximum CFAPI user threads |
 | `CFAPI_MAX_CSP_THREADS` | `32` | Maximum CFAPI CSP threads |
@@ -56,6 +57,9 @@ An explicitly present but empty primary variable is invalid and does not fall ba
 
 Values validated as nonzero must be greater than zero. Durations use seconds unless the variable
 name ends in `_MS`.
+
+Sync terminal logs contain only operational metadata: source, manual job ID when applicable, record
+counts, generation, elapsed time, and error details. They do not log credentials or record payloads.
 
 ## Run
 

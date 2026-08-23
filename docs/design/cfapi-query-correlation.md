@@ -54,6 +54,13 @@ Tag 0 is invalid. Reject collision with an active tag or unexpired tombstone bef
 
 Lookup or terminal ownership occurs under the registry lock. Parsing and channel sends occur after releasing it.
 
+Live verification adds one protocol nuance for whole-source QueryXref: `MessageEvent::getSource()`
+may return 0 or be absent. Classify the callback tag as active, late, duplicate, or unknown before
+constructing a row. For an active tag, the source bound to that request in `PendingRegistry` is
+authoritative; copy it into the owned row and do not trust the event source. Late, duplicate, and
+unknown tags remain metrics-only and are ignored. This source resolution stays inside the existing
+metadata-copy step and does not expand the callback budget.
+
 ## State Machine
 
 ```text
