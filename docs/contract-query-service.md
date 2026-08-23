@@ -92,7 +92,7 @@ curl -sS --get "$BASE/v1/contracts/by-source" \
   --data-urlencode 'consistency=cache_preferred'
 
 curl -sS --get "$BASE/v1/contracts/by-exchange" \
-  --data-urlencode 'exchange=XNAS' \
+  --data-urlencode 'exchange=XNGS' \
   --data-urlencode 'code=AAPL' \
   --data-urlencode 'consistency=fresh_required'
 ```
