@@ -264,7 +264,7 @@ pub fn build_owned_query_xref_row(
             tokens.push(token);
         }
     }
-    if symbol.is_empty() && tokens.is_empty() {
+    if tokens.is_empty() {
         return Ok(None);
     }
     Ok(Some(OwnedQueryXrefRow {

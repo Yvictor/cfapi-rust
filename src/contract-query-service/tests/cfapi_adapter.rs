@@ -91,10 +91,10 @@ fn builds_an_owned_row_without_borrowing_callback_memory() {
 }
 
 #[test]
-fn empty_image_complete_has_no_final_row() {
+fn zero_token_image_complete_with_symbol_has_no_final_row() {
     let row = build_owned_query_xref_row(
         533,
-        String::new(),
+        "AAPL".to_owned(),
         Vec::<(i32, CFValue)>::new(),
         datetime!(2026-08-19 10:00 UTC),
     )
