@@ -32,6 +32,40 @@ fn requires_password_and_never_echoes_it() {
 }
 
 #[test]
+fn accepts_legacy_cfapi_credential_and_host_aliases() {
+    let values = HashMap::from([
+        ("CFAPI_USER", "legacy-user"),
+        ("CFAPI_PASS", "legacy-password"),
+        ("CFAPI_HOST", "216.221.209.61:7022"),
+    ]);
+    let config = RuntimeConfig::from_values(values).expect("legacy aliases are supported");
+    assert_eq!(config.hosts(), &["216.221.209.61:7022"]);
+}
+
+#[test]
+fn primary_cfapi_names_take_priority_over_aliases() {
+    let mut values = required();
+    values.extend([
+        ("CFAPI_USER", "ignored-user"),
+        ("CFAPI_PASS", "ignored-password"),
+        ("CFAPI_HOST", "invalid-ignored-host"),
+    ]);
+    let config = RuntimeConfig::from_values(values).expect("primary values win");
+    assert_eq!(config.hosts().len(), 2);
+}
+
+#[test]
+fn invalid_primary_value_does_not_fall_back_to_alias() {
+    let mut values = required();
+    values.insert("CFAPI_PASSWORD", "");
+    values.insert("CFAPI_PASS", "fallback-must-not-be-used");
+    assert_eq!(
+        RuntimeConfig::from_values(values).err(),
+        Some(ConfigError::Missing("CFAPI_PASSWORD"))
+    );
+}
+
+#[test]
 fn errors_name_keys_not_secret_values() {
     let mut values = required();
     values.insert("CONTRACT_QUERY_TIMEOUT_MS", "highly-sensitive-password");
