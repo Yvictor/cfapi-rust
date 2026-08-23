@@ -12,6 +12,7 @@ default = []
 cfapi = ["dep:cfapi"]
 runtime = [
     "cfapi",
+    "dep:tracing-subscriber",
     "salvo/server",
     "salvo/server-handle",
     "salvo/http1",
@@ -31,6 +32,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 thiserror = "1.0.69"
 time = { version = "0.3.47", features = ["formatting", "macros"] }
 tokio = { version = "1.52.3", features = ["macros", "rt", "sync", "time"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", optional = true }
 ulid = "1.2.1"
 
 [dev-dependencies]

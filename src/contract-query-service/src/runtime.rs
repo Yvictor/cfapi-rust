@@ -493,9 +493,25 @@ fn compose(config: RuntimeConfig) -> Result<RuntimeParts, RuntimeError> {
             let session_gate = Arc::clone(&session_gate);
             startup_tasks.spawn(async move {
                 session_gate.wait_available().await;
-                // A failed startup sync leaves this source incomplete and readiness
-                // false. A later successful manual sync is observed by the monitor.
-                let _ = service.sync_source(source).await;
+                let started = std::time::Instant::now();
+                match service.sync_source(source).await {
+                    Ok(outcome) => tracing::info!(
+                        source_id = source,
+                        received_records = outcome.received_records,
+                        accepted_records = outcome.accepted_records,
+                        rejected_records = outcome.rejected_records,
+                        generation_id = %outcome.generation.id(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "automatic contract source sync succeeded"
+                    ),
+                    Err(error) => tracing::error!(
+                        source_id = source,
+                        error = %error,
+                        error_debug = ?error,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "automatic contract source sync failed"
+                    ),
+                }
             });
         }
     }

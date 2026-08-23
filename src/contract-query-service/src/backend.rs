@@ -21,6 +21,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Instant,
 };
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime, UtcOffset};
@@ -452,18 +453,39 @@ impl ContractHttpBackend for ContractBackend {
         let readiness = Arc::clone(&self.readiness);
         tokio::spawn(async move {
             jobs.mark_running(&job_id, OffsetDateTime::now_utc());
+            let started = Instant::now();
             match service.sync_source(request.source_id).await {
                 Ok(outcome) => {
+                    tracing::info!(
+                        source_id = request.source_id,
+                        job_id = %job_id,
+                        received_records = outcome.received_records,
+                        accepted_records = outcome.accepted_records,
+                        rejected_records = outcome.rejected_records,
+                        generation_id = %outcome.generation.id(),
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "manual contract source sync succeeded"
+                    );
                     if caches.values().all(|cache| cache.snapshot().is_complete()) {
                         readiness.set_cache(true);
                     }
                     jobs.finish_success(&job_id, outcome, OffsetDateTime::now_utc());
                 }
-                Err(error) => jobs.finish_error(
-                    &job_id,
-                    map_service_error(error, Some(request.source_id), None),
-                    OffsetDateTime::now_utc(),
-                ),
+                Err(error) => {
+                    tracing::error!(
+                        source_id = request.source_id,
+                        job_id = %job_id,
+                        error = %error,
+                        error_debug = ?error,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "manual contract source sync failed"
+                    );
+                    jobs.finish_error(
+                        &job_id,
+                        map_service_error(error, Some(request.source_id), None),
+                        OffsetDateTime::now_utc(),
+                    );
+                }
             }
         });
         Ok(created)
