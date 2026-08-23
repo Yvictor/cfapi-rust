@@ -448,10 +448,17 @@ impl ContractHttpBackend for ContractBackend {
         }
         let job_id = created.job.job_id.clone();
         let jobs = Arc::clone(&self.jobs);
+        let caches = Arc::clone(&self.caches);
+        let readiness = Arc::clone(&self.readiness);
         tokio::spawn(async move {
             jobs.mark_running(&job_id, OffsetDateTime::now_utc());
             match service.sync_source(request.source_id).await {
-                Ok(outcome) => jobs.finish_success(&job_id, outcome, OffsetDateTime::now_utc()),
+                Ok(outcome) => {
+                    if caches.values().all(|cache| cache.snapshot().is_complete()) {
+                        readiness.set_cache(true);
+                    }
+                    jobs.finish_success(&job_id, outcome, OffsetDateTime::now_utc());
+                }
                 Err(error) => jobs.finish_error(
                     &job_id,
                     map_service_error(error, Some(request.source_id), None),
