@@ -11,11 +11,10 @@ use cfapi::{
     binding::{SessionEvent, SessionEvent_Types},
     session_event::SessionEventHandlerExt,
 };
-use parking_lot::Mutex;
 use salvo::conn::Listener;
 use salvo::prelude::{Server, TcpListener};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, HashMap},
     env,
     net::SocketAddr,
     str::FromStr,
@@ -249,53 +248,33 @@ pub struct RuntimeSessionEventHandler {
     readiness: Arc<ReadinessState>,
     registry: Arc<PendingRegistry>,
     session_gate: Arc<SessionGate>,
-    sources: Mutex<SourceAvailability>,
 }
 
 impl RuntimeSessionEventHandler {
     pub fn new(readiness: Arc<ReadinessState>, registry: Arc<PendingRegistry>) -> Self {
-        Self::with_gate(
-            readiness,
-            registry,
-            Arc::new(SessionGate::default()),
-            std::iter::empty(),
-        )
+        Self::with_gate(readiness, registry, Arc::new(SessionGate::default()))
     }
 
     fn with_gate(
         readiness: Arc<ReadinessState>,
         registry: Arc<PendingRegistry>,
         session_gate: Arc<SessionGate>,
-        required_sources: impl IntoIterator<Item = u16>,
     ) -> Self {
         Self {
             readiness,
             registry,
             session_gate,
-            sources: Mutex::new(SourceAvailability::new(required_sources)),
         }
     }
 
     fn handle_status(&self, status: RuntimeSessionStatus) {
         match status {
-            RuntimeSessionStatus::AvailableAllSources => {
-                self.sources.lock().mark_all_available();
-                self.set_available(true);
-            }
-            RuntimeSessionStatus::AvailableSource(source_id) => {
-                let ready = self.sources.lock().mark_available(source_id);
-                self.set_available(ready);
-            }
-            RuntimeSessionStatus::Established => {
-                self.sources.lock().clear();
-                self.set_available(false);
-            }
-            RuntimeSessionStatus::RecoverySource(source_id) => {
-                self.sources.lock().mark_unavailable(source_id);
-                self.fail_pending();
-            }
-            RuntimeSessionStatus::RecoveryAll | RuntimeSessionStatus::Unavailable => {
-                self.sources.lock().clear();
+            RuntimeSessionStatus::Established
+            | RuntimeSessionStatus::AvailableAllSources
+            | RuntimeSessionStatus::AvailableSource => self.set_available(true),
+            RuntimeSessionStatus::RecoverySource
+            | RuntimeSessionStatus::RecoveryAll
+            | RuntimeSessionStatus::Unavailable => {
                 self.fail_pending();
             }
         }
@@ -319,19 +298,15 @@ impl SessionEventHandlerExt for RuntimeSessionEventHandler {
                 Some(RuntimeSessionStatus::AvailableAllSources)
             }
             SessionEvent_Types::CFAPI_SESSION_AVAILABLE_SOURCES => {
-                u16::try_from(event.getSourceID().0)
-                    .ok()
-                    .map(RuntimeSessionStatus::AvailableSource)
+                Some(RuntimeSessionStatus::AvailableSource)
             }
             SessionEvent_Types::CFAPI_SESSION_ESTABLISHED => {
                 Some(RuntimeSessionStatus::Established)
             }
             SessionEvent_Types::CFAPI_SESSION_RECOVERY => Some(RuntimeSessionStatus::RecoveryAll),
-            SessionEvent_Types::CFAPI_SESSION_RECOVERY_SOURCES => Some(
-                u16::try_from(event.getSourceID().0)
-                    .map(RuntimeSessionStatus::RecoverySource)
-                    .unwrap_or(RuntimeSessionStatus::RecoveryAll),
-            ),
+            SessionEvent_Types::CFAPI_SESSION_RECOVERY_SOURCES => {
+                Some(RuntimeSessionStatus::RecoverySource)
+            }
             SessionEvent_Types::CFAPI_SESSION_UNAVAILABLE => {
                 Some(RuntimeSessionStatus::Unavailable)
             }
@@ -347,43 +322,10 @@ impl SessionEventHandlerExt for RuntimeSessionEventHandler {
 enum RuntimeSessionStatus {
     Established,
     AvailableAllSources,
-    AvailableSource(u16),
+    AvailableSource,
     RecoveryAll,
-    RecoverySource(u16),
+    RecoverySource,
     Unavailable,
-}
-
-struct SourceAvailability {
-    required: BTreeSet<u16>,
-    available: BTreeSet<u16>,
-}
-
-impl SourceAvailability {
-    fn new(required: impl IntoIterator<Item = u16>) -> Self {
-        Self {
-            required: required.into_iter().collect(),
-            available: BTreeSet::new(),
-        }
-    }
-
-    fn mark_all_available(&mut self) {
-        self.available.clone_from(&self.required);
-    }
-
-    fn mark_available(&mut self, source_id: u16) -> bool {
-        if self.required.is_empty() || self.required.contains(&source_id) {
-            self.available.insert(source_id);
-        }
-        self.required.is_empty() || self.required.is_subset(&self.available)
-    }
-
-    fn mark_unavailable(&mut self, source_id: u16) {
-        self.available.remove(&source_id);
-    }
-
-    fn clear(&mut self) {
-        self.available.clear();
-    }
 }
 
 #[derive(Default)]
@@ -469,7 +411,6 @@ fn compose(config: RuntimeConfig) -> Result<RuntimeParts, RuntimeError> {
         Arc::clone(&readiness),
         Arc::clone(&registry),
         Arc::clone(&session_gate),
-        config.sources.iter().copied(),
     );
     let cfapi_config = CFAPIConfig::new(
         "contract-query-service".to_owned(),
@@ -647,9 +588,7 @@ where
 mod tests {
     use super::*;
 
-    fn handler(
-        required_sources: impl IntoIterator<Item = u16>,
-    ) -> (
+    fn handler() -> (
         RuntimeSessionEventHandler,
         Arc<PendingRegistry>,
         Arc<SessionGate>,
@@ -661,41 +600,46 @@ mod tests {
             Arc::clone(&readiness),
             Arc::clone(&registry),
             Arc::clone(&gate),
-            required_sources,
         );
         (handler, registry, gate)
     }
 
     #[test]
-    fn established_is_not_ready_until_every_configured_source_is_available() {
-        let (handler, _, gate) = handler([533, 534]);
+    fn established_immediately_marks_the_session_ready() {
+        let (handler, _, gate) = handler();
 
         handler.handle_status(RuntimeSessionStatus::Established);
-        assert!(!gate.available.load(Ordering::Acquire));
-
-        handler.handle_status(RuntimeSessionStatus::AvailableSource(533));
-        assert!(!gate.available.load(Ordering::Acquire));
-
-        handler.handle_status(RuntimeSessionStatus::AvailableSource(534));
         assert!(gate.available.load(Ordering::Acquire));
     }
 
     #[test]
-    fn all_sources_event_marks_the_configured_set_ready() {
-        let (handler, _, gate) = handler([533, 534]);
+    fn available_events_keep_an_established_session_ready() {
+        let (handler, _, gate) = handler();
+        handler.handle_status(RuntimeSessionStatus::Established);
+
+        handler.handle_status(RuntimeSessionStatus::AvailableSource);
+        assert!(gate.available.load(Ordering::Acquire));
+
         handler.handle_status(RuntimeSessionStatus::AvailableAllSources);
+        assert!(gate.available.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn a_source_available_event_can_mark_the_session_ready() {
+        let (handler, _, gate) = handler();
+        handler.handle_status(RuntimeSessionStatus::AvailableSource);
         assert!(gate.available.load(Ordering::Acquire));
     }
 
     #[tokio::test]
     async fn recovery_and_unavailable_fail_pending_and_clear_readiness() {
         for status in [
-            RuntimeSessionStatus::RecoverySource(533),
+            RuntimeSessionStatus::RecoverySource,
             RuntimeSessionStatus::RecoveryAll,
             RuntimeSessionStatus::Unavailable,
         ] {
-            let (handler, registry, gate) = handler([533, 534]);
-            handler.handle_status(RuntimeSessionStatus::AvailableAllSources);
+            let (handler, registry, gate) = handler();
+            handler.handle_status(RuntimeSessionStatus::Established);
             let query = registry.register_exact(1, 533).expect("register query");
 
             handler.handle_status(status);
