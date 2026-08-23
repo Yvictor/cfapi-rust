@@ -11,15 +11,16 @@ use cfapi::{
     binding::{SessionEvent, SessionEvent_Types},
     session_event::SessionEventHandlerExt,
 };
+use parking_lot::Mutex;
 use salvo::conn::Listener;
 use salvo::prelude::{Server, TcpListener};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     env,
     net::SocketAddr,
     str::FromStr,
     sync::{
-        atomic::{AtomicBool, AtomicUsize, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
     time::Duration,
@@ -29,8 +30,11 @@ use tokio::{sync::Notify, task::JoinSet};
 
 const HTTP_BIND: &str = "CONTRACT_HTTP_BIND";
 const USERNAME: &str = "CFAPI_USERNAME";
+const USERNAME_ALIAS: &str = "CFAPI_USER";
 const PASSWORD: &str = "CFAPI_PASSWORD";
+const PASSWORD_ALIAS: &str = "CFAPI_PASS";
 const HOSTS: &str = "CFAPI_HOSTS";
+const HOSTS_ALIAS: &str = "CFAPI_HOST";
 const SOURCES: &str = "CFAPI_SOURCES";
 
 /// Runtime configuration intentionally has no `Debug` implementation because it
@@ -68,17 +72,10 @@ impl RuntimeConfig {
             .into_iter()
             .map(|(key, value)| (key.into(), value.into()))
             .collect();
-        let required = |key: &'static str| {
-            values
-                .get(key)
-                .filter(|value| !value.trim().is_empty())
-                .cloned()
-                .ok_or(ConfigError::Missing(key))
-        };
         let bind = parse_value(&values, HTTP_BIND, "0.0.0.0:8080")?;
-        let username = required(USERNAME)?;
-        let password = required(PASSWORD)?;
-        let hosts = csv(&required(HOSTS)?, HOSTS)?;
+        let username = required_with_alias(&values, USERNAME, USERNAME_ALIAS)?;
+        let password = required_with_alias(&values, PASSWORD, PASSWORD_ALIAS)?;
+        let hosts = csv(&required_with_alias(&values, HOSTS, HOSTS_ALIAS)?, HOSTS)?;
         if !hosts.iter().all(|host| valid_host(host)) {
             return Err(ConfigError::Invalid(HOSTS));
         }
@@ -252,42 +249,140 @@ pub struct RuntimeSessionEventHandler {
     readiness: Arc<ReadinessState>,
     registry: Arc<PendingRegistry>,
     session_gate: Arc<SessionGate>,
+    sources: Mutex<SourceAvailability>,
 }
 
 impl RuntimeSessionEventHandler {
     pub fn new(readiness: Arc<ReadinessState>, registry: Arc<PendingRegistry>) -> Self {
-        Self::with_gate(readiness, registry, Arc::new(SessionGate::default()))
+        Self::with_gate(
+            readiness,
+            registry,
+            Arc::new(SessionGate::default()),
+            std::iter::empty(),
+        )
     }
 
     fn with_gate(
         readiness: Arc<ReadinessState>,
         registry: Arc<PendingRegistry>,
         session_gate: Arc<SessionGate>,
+        required_sources: impl IntoIterator<Item = u16>,
     ) -> Self {
         Self {
             readiness,
             registry,
             session_gate,
+            sources: Mutex::new(SourceAvailability::new(required_sources)),
         }
+    }
+
+    fn handle_status(&self, status: RuntimeSessionStatus) {
+        match status {
+            RuntimeSessionStatus::AvailableAllSources => {
+                self.sources.lock().mark_all_available();
+                self.set_available(true);
+            }
+            RuntimeSessionStatus::AvailableSource(source_id) => {
+                let ready = self.sources.lock().mark_available(source_id);
+                self.set_available(ready);
+            }
+            RuntimeSessionStatus::Established => {
+                self.sources.lock().clear();
+                self.set_available(false);
+            }
+            RuntimeSessionStatus::RecoverySource(source_id) => {
+                self.sources.lock().mark_unavailable(source_id);
+                self.fail_pending();
+            }
+            RuntimeSessionStatus::RecoveryAll | RuntimeSessionStatus::Unavailable => {
+                self.sources.lock().clear();
+                self.fail_pending();
+            }
+        }
+    }
+
+    fn set_available(&self, available: bool) {
+        self.readiness.set_cfapi_session(available);
+        self.session_gate.set_available(available);
+    }
+
+    fn fail_pending(&self) {
+        self.set_available(false);
+        self.registry.fail_all(QueryError::SessionUnavailable);
     }
 }
 
 impl SessionEventHandlerExt for RuntimeSessionEventHandler {
     fn on_session_event(&mut self, event: &SessionEvent) {
-        match event.getType() {
-            SessionEvent_Types::CFAPI_SESSION_ESTABLISHED
-            | SessionEvent_Types::CFAPI_SESSION_AVAILABLE_ALLSOURCES
-            | SessionEvent_Types::CFAPI_SESSION_AVAILABLE_SOURCES => {
-                self.readiness.set_cfapi_session(true);
-                self.session_gate.set_available(true);
+        let status = match event.getType() {
+            SessionEvent_Types::CFAPI_SESSION_AVAILABLE_ALLSOURCES => {
+                Some(RuntimeSessionStatus::AvailableAllSources)
             }
+            SessionEvent_Types::CFAPI_SESSION_AVAILABLE_SOURCES => {
+                u16::try_from(event.getSourceID().0)
+                    .ok()
+                    .map(RuntimeSessionStatus::AvailableSource)
+            }
+            SessionEvent_Types::CFAPI_SESSION_ESTABLISHED => {
+                Some(RuntimeSessionStatus::Established)
+            }
+            SessionEvent_Types::CFAPI_SESSION_RECOVERY => Some(RuntimeSessionStatus::RecoveryAll),
+            SessionEvent_Types::CFAPI_SESSION_RECOVERY_SOURCES => Some(
+                u16::try_from(event.getSourceID().0)
+                    .map(RuntimeSessionStatus::RecoverySource)
+                    .unwrap_or(RuntimeSessionStatus::RecoveryAll),
+            ),
             SessionEvent_Types::CFAPI_SESSION_UNAVAILABLE => {
-                self.readiness.set_cfapi_session(false);
-                self.session_gate.set_available(false);
-                self.registry.fail_all(QueryError::SessionUnavailable);
+                Some(RuntimeSessionStatus::Unavailable)
             }
-            _ => {}
+            _ => None,
+        };
+        if let Some(status) = status {
+            self.handle_status(status);
         }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RuntimeSessionStatus {
+    Established,
+    AvailableAllSources,
+    AvailableSource(u16),
+    RecoveryAll,
+    RecoverySource(u16),
+    Unavailable,
+}
+
+struct SourceAvailability {
+    required: BTreeSet<u16>,
+    available: BTreeSet<u16>,
+}
+
+impl SourceAvailability {
+    fn new(required: impl IntoIterator<Item = u16>) -> Self {
+        Self {
+            required: required.into_iter().collect(),
+            available: BTreeSet::new(),
+        }
+    }
+
+    fn mark_all_available(&mut self) {
+        self.available.clone_from(&self.required);
+    }
+
+    fn mark_available(&mut self, source_id: u16) -> bool {
+        if self.required.is_empty() || self.required.contains(&source_id) {
+            self.available.insert(source_id);
+        }
+        self.required.is_empty() || self.required.is_subset(&self.available)
+    }
+
+    fn mark_unavailable(&mut self, source_id: u16) {
+        self.available.remove(&source_id);
+    }
+
+    fn clear(&mut self) {
+        self.available.clear();
     }
 }
 
@@ -374,6 +469,7 @@ fn compose(config: RuntimeConfig) -> Result<RuntimeParts, RuntimeError> {
         Arc::clone(&readiness),
         Arc::clone(&registry),
         Arc::clone(&session_gate),
+        config.sources.iter().copied(),
     );
     let cfapi_config = CFAPIConfig::new(
         "contract-query-service".to_owned(),
@@ -430,6 +526,7 @@ fn compose(config: RuntimeConfig) -> Result<RuntimeParts, RuntimeError> {
     readiness.set_query_coordinator(true);
     readiness.set_sync_coordinator(true);
 
+    let readiness_caches: Vec<_> = caches.values().cloned().collect();
     let backend = Arc::new(ContractBackend::new(
         services.clone(),
         caches,
@@ -437,19 +534,27 @@ fn compose(config: RuntimeConfig) -> Result<RuntimeParts, RuntimeError> {
         Arc::clone(&readiness),
     )?);
     let mut startup_tasks = JoinSet::new();
+    let cache_readiness = Arc::clone(&readiness);
+    startup_tasks.spawn(async move {
+        loop {
+            if readiness_caches
+                .iter()
+                .all(|cache| cache.snapshot().is_complete())
+            {
+                cache_readiness.set_cache(true);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+    });
     if config.auto_sync {
-        let remaining = Arc::new(AtomicUsize::new(services.len()));
         for (source, service) in services {
-            let readiness = Arc::clone(&readiness);
-            let remaining = Arc::clone(&remaining);
             let session_gate = Arc::clone(&session_gate);
             startup_tasks.spawn(async move {
                 session_gate.wait_available().await;
-                if service.sync_source(source).await.is_ok()
-                    && remaining.fetch_sub(1, Ordering::AcqRel) == 1
-                {
-                    readiness.set_cache(true);
-                }
+                // A failed startup sync leaves this source incomplete and readiness
+                // false. A later successful manual sync is observed by the monitor.
+                let _ = service.sync_source(source).await;
             });
         }
     }
@@ -476,6 +581,18 @@ fn csv(value: &str, key: &'static str) -> Result<Vec<String>, ConfigError> {
     } else {
         Ok(parsed)
     }
+}
+
+fn required_with_alias(
+    values: &HashMap<String, String>,
+    primary: &'static str,
+    alias: &'static str,
+) -> Result<String, ConfigError> {
+    let selected = values
+        .get(primary)
+        .or_else(|| values.get(alias))
+        .filter(|value| !value.trim().is_empty());
+    selected.cloned().ok_or(ConfigError::Missing(primary))
 }
 
 fn parse_sources(value: &str) -> Result<Vec<u16>, ConfigError> {
@@ -523,5 +640,69 @@ where
         Err(ConfigError::OutOfRange(key))
     } else {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handler(
+        required_sources: impl IntoIterator<Item = u16>,
+    ) -> (
+        RuntimeSessionEventHandler,
+        Arc<PendingRegistry>,
+        Arc<SessionGate>,
+    ) {
+        let readiness = Arc::new(ReadinessState::not_ready());
+        let registry = Arc::new(PendingRegistry::new(RegistryLimits::default()));
+        let gate = Arc::new(SessionGate::default());
+        let handler = RuntimeSessionEventHandler::with_gate(
+            Arc::clone(&readiness),
+            Arc::clone(&registry),
+            Arc::clone(&gate),
+            required_sources,
+        );
+        (handler, registry, gate)
+    }
+
+    #[test]
+    fn established_is_not_ready_until_every_configured_source_is_available() {
+        let (handler, _, gate) = handler([533, 534]);
+
+        handler.handle_status(RuntimeSessionStatus::Established);
+        assert!(!gate.available.load(Ordering::Acquire));
+
+        handler.handle_status(RuntimeSessionStatus::AvailableSource(533));
+        assert!(!gate.available.load(Ordering::Acquire));
+
+        handler.handle_status(RuntimeSessionStatus::AvailableSource(534));
+        assert!(gate.available.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn all_sources_event_marks_the_configured_set_ready() {
+        let (handler, _, gate) = handler([533, 534]);
+        handler.handle_status(RuntimeSessionStatus::AvailableAllSources);
+        assert!(gate.available.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn recovery_and_unavailable_fail_pending_and_clear_readiness() {
+        for status in [
+            RuntimeSessionStatus::RecoverySource(533),
+            RuntimeSessionStatus::RecoveryAll,
+            RuntimeSessionStatus::Unavailable,
+        ] {
+            let (handler, registry, gate) = handler([533, 534]);
+            handler.handle_status(RuntimeSessionStatus::AvailableAllSources);
+            let query = registry.register_exact(1, 533).expect("register query");
+
+            handler.handle_status(status);
+
+            assert!(!gate.available.load(Ordering::Acquire));
+            assert_eq!(query.receive().await, Err(QueryError::SessionUnavailable));
+            assert_eq!(registry.pending_count(), 0);
+        }
     }
 }
