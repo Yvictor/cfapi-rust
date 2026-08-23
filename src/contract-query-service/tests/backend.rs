@@ -142,6 +142,18 @@ fn publish(cache: &SourceCache, rows: Vec<OwnedQueryXrefRow>) {
 }
 
 fn backend(fixtures: &[&SourceFixture], max_retained_jobs: usize) -> ContractBackend {
+    backend_with_readiness(
+        fixtures,
+        max_retained_jobs,
+        Arc::new(ReadinessState::ready()),
+    )
+}
+
+fn backend_with_readiness(
+    fixtures: &[&SourceFixture],
+    max_retained_jobs: usize,
+    readiness: Arc<ReadinessState>,
+) -> ContractBackend {
     let services = fixtures
         .iter()
         .map(|fixture| {
@@ -167,7 +179,7 @@ fn backend(fixtures: &[&SourceFixture], max_retained_jobs: usize) -> ContractBac
             freshness: policy(),
             max_retained_jobs,
         },
-        Arc::new(ReadinessState::ready()),
+        readiness,
     )
     .unwrap()
 }
@@ -319,6 +331,65 @@ async fn sync_job_reports_precise_received_accepted_and_rejected_counts() {
     assert_eq!(completed.accepted_records, 2);
     assert_eq!(completed.rejected_records, 1);
     assert_eq!(source.cache.snapshot().len(), 2);
+}
+
+#[tokio::test]
+async fn manual_sync_marks_cache_ready_only_after_every_source_succeeds() {
+    let left = source_fixture(533, Duration::from_millis(100));
+    let right = source_fixture(534, Duration::from_millis(100));
+    left.actions
+        .lock()
+        .unwrap()
+        .push_back(Action::Whole(vec![row(533, "AAPL", "XNAS", "Apple")]));
+    right
+        .actions
+        .lock()
+        .unwrap()
+        .push_back(Action::Whole(vec![row(534, "MSFT", "XNAS", "Microsoft")]));
+    let readiness = Arc::new(ReadinessState::ready());
+    readiness.set_cache(false);
+    let backend = backend_with_readiness(&[&left, &right], 8, Arc::clone(&readiness));
+
+    let first = backend
+        .create_sync_job(CreateSyncJobRequest { source_id: 533 }, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        wait_for_terminal(&backend, &first.job.job_id).await.status,
+        SyncJobStatus::Succeeded
+    );
+    assert!(!backend.readiness().await.is_ready());
+
+    let second = backend
+        .create_sync_job(CreateSyncJobRequest { source_id: 534 }, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        wait_for_terminal(&backend, &second.job.job_id).await.status,
+        SyncJobStatus::Succeeded
+    );
+    assert!(backend.readiness().await.is_ready());
+}
+
+#[tokio::test]
+async fn failed_manual_sync_does_not_mark_cache_ready() {
+    let source = source_fixture(533, Duration::from_millis(10));
+    publish(&source.cache, vec![row(533, "AAPL", "XNAS", "Apple")]);
+    let readiness = Arc::new(ReadinessState::ready());
+    readiness.set_cache(false);
+    let backend = backend_with_readiness(&[&source], 8, Arc::clone(&readiness));
+
+    let created = backend
+        .create_sync_job(CreateSyncJobRequest { source_id: 533 }, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        wait_for_terminal(&backend, &created.job.job_id)
+            .await
+            .status,
+        SyncJobStatus::Failed
+    );
+    assert!(!backend.readiness().await.is_ready());
 }
 
 #[tokio::test]
